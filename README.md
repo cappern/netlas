@@ -23,6 +23,7 @@ are three views of one model:
 | L1 | `devices` + `links` | Cabling, ports, media, LAGs |
 | L2 | interface VLAN membership | Broadcast domains, trunks, SVIs |
 | L3 | interface IPs + `routing` | Networks, gateways, VRFs, adjacencies |
+| ISO | same graph as L1 | The same cabling as an isometric floor plan |
 
 Change a trunk's VLAN list and all three layers update together, because there
 is nowhere else for the fact to live.
@@ -32,7 +33,8 @@ is nowhere else for the fact to live.
 ```
 netdia validate <model.yaml> [--json]
 netdia svg      <model.yaml> --layer l1|l2|l3 [-o file.svg] [--theme <id>]
-netdia render   <model.yaml> [-o file.html] [--theme <id>] [--no-3d]
+netdia iso      <model.yaml> [-o file.svg] [--theme <id>]
+netdia render   <model.yaml> [-o file.html] [--theme <id>] [--no-3d] [--no-iso]
 netdia freeze   <model.yaml> [--layer l1|l2|l3|all] [--reset]
 netdia themes
 ```
@@ -123,14 +125,38 @@ encodes media as dash pattern and line weight instead, for black-and-white
 printing and for audits where colour would imply meaning the model does not
 carry.
 
+## Isometric L1
+
+`netdia iso` draws the physical layer as a 2.5D floor plan: devices are slabs
+standing on their security zone's floor plate, cables run through the space
+between them, and a painter's-algorithm depth sort makes a slab in front hide
+the cable behind it. It is ordinary SVG, so it prints and exports like every
+other layer.
+
+Placement is its own compact grid rather than a reprojection of the flat L1
+layout. Projecting the flat layout directly is the obvious approach and it
+looks wrong: the diagonal projection stretches a tiered drawing across a
+bounding box that is mostly empty. The grid keeps the two facts that carry
+meaning — which tier a device sits in, and its left-to-right order within that
+tier — and drops only the pixel spacing, which carried none.
+
+Zone floor plates are drawn only when they do not overlap. Grid rows follow
+tiers, not zones, so a zone's members are not always contiguous; two
+overlapping plates would claim a device stands in both zones at once. When
+that happens the plates are dropped and each slab carries its zone as text.
+
+Labels stay screen-aligned. Skewing text into the isometric plane looks clever
+in one screenshot and is unreadable everywhere else.
+
 ## Viewer
 
 `netdia render` produces one HTML file with no external requests — no CDN, no
 web fonts, no network at all. It opens from a USB stick in a plant room.
 
-Layer tabs, pan and zoom, click-to-inspect (interfaces, IPs, VLANs, services),
-search across hostnames, IPs, VLAN ids and port names, SVG and PNG export, and
-print-to-PDF.
+Tabs for L1, L2, L3, ISO and 3D; pan and zoom; click-to-inspect (interfaces,
+IPs, VLANs, services); search across hostnames, IPs, VLAN ids and port names;
+SVG and PNG export; and print-to-PDF. The ISO tab shares L1's inspector data,
+so clicking a slab shows the same device detail as clicking its flat card.
 
 The 3D tab stacks L1, L2 and L3 as three floors. A device keeps its position
 across every floor it appears on and a vertical tie line runs through those
@@ -138,7 +164,8 @@ copies, which is the one thing a flat diagram cannot show: that the cable in
 L1, the VLAN in L2 and the gateway in L3 are the same box in the rack.
 
 three.js is inlined but lazy-loaded, so 2D opens instantly. It costs about
-530 KB of the ~680 KB example file; `--no-3d` brings that to ~150 KB.
+530 KB of the ~715 KB example file; `--no-3d` brings that to ~180 KB, and
+`--no-iso` drops the isometric drawing as well.
 
 ## Icons
 
@@ -153,8 +180,10 @@ is carried by a short text mark, which is accurate and unrestricted.
 npm test
 ```
 
-Covers validation rules, layer derivation, tier ordering, zone-hull fallback,
-SVG well-formedness, XML escaping, viewBox containment, and freeze round-trips.
+35 tests covering validation rules, layer derivation, tier ordering, zone-hull
+and zone-plate fallbacks, SVG well-formedness in every theme, XML escaping,
+viewBox containment for both the flat and isometric renderers, isometric depth
+ordering, and freeze round-trips.
 
 ## Layout of the repository
 
@@ -162,7 +191,7 @@ SVG well-formedness, XML escaping, viewBox containment, and freeze round-trips.
 bin/netdia.mjs        CLI
 src/model/            schema, loader, validator, layer derivation
 src/layout/           ELK layout, role tiers, freeze
-src/render2d/         SVG renderer and icon set
+src/render2d/         flat SVG renderer, isometric renderer, icon set
 src/render3d/         three.js stacked-layer scene (+ prebuilt bundle)
 src/theme/            theme tokens
 src/viewer/           HTML viewer shell, CSS, runtime

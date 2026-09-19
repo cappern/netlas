@@ -98,7 +98,7 @@ export function renderSvg(graph, placed, theme, opts = {}) {
 
 /* ---- chrome ---------------------------------------------------------- */
 
-function defs(theme) {
+export function defs(theme) {
   const arrow = (id, color) =>
     `<marker id="${id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">` +
     `<path d="M0 1 L9 5 L0 9 z" fill="${color}"/></marker>`;
@@ -122,7 +122,7 @@ function defs(theme) {
   return `<defs>${markers}${glow}${grid}</defs>`;
 }
 
-function background(w, h, theme) {
+export function background(w, h, theme) {
   const grid = theme.gridStyle === 'none' ? '' : `<rect width="${w}" height="${h}" fill="url(#nd-grid)"/>`;
   return `<rect width="${w}" height="${h}" fill="${theme.bg}"/>${grid}`;
 }
@@ -188,17 +188,36 @@ function collectChips(out, e, pts, theme) {
   }
   if (e.label) {
     const mid = midpointOf(pts);
-    out.push(
-      chipSpec(e.label, mid.x, mid.y, theme, {
-        fill: theme.bg,
-        stroke: theme.strokeSoft,
-        text: theme.textMuted,
-        size: 10,
-        mono: false,
-        axis: 'x',
-      }),
-    );
+    const spec = chipSpec(e.label, mid.x, mid.y, theme, {
+      fill: theme.bg,
+      stroke: theme.strokeSoft,
+      text: theme.textMuted,
+      size: 10,
+      mono: false,
+      axis: Math.abs(mid.dy) >= Math.abs(mid.dx) ? 'y' : 'x',
+    });
+    offsetOffCable(spec, mid.dx, mid.dy);
+    out.push(spec);
   }
+}
+
+/**
+ * Move a label clear of the cable it annotates.
+ *
+ * A chip drawn on top of its own line breaks the line into stubs, and on a
+ * short run between two switches that reads as a missing link. Sitting the
+ * label beside the cable keeps the cable continuous, which is the one thing
+ * an L1 drawing has to get right.
+ */
+function offsetOffCable(spec, dx, dy) {
+  const len = Math.hypot(dx, dy) || 1;
+  // Perpendicular, rotated so vertical cables label to the right and
+  // horizontal cables label above.
+  const px = dy / len;
+  const py = -dx / len;
+  const gap = (Math.abs(px) > Math.abs(py) ? spec.w : spec.h) / 2 + 5;
+  spec.cx += px * gap;
+  spec.cy += py * gap;
 }
 
 /**
@@ -248,8 +267,8 @@ function portChip(text, at, toward, theme, media) {
   const dx = toward.x - at.x;
   const dy = toward.y - at.y;
   const len = Math.hypot(dx, dy) || 1;
-  const off = Math.min(28, Math.max(16, len * 0.42));
-  return chipSpec(text, at.x + (dx / len) * off, at.y + (dy / len) * off, theme, {
+  const off = Math.min(26, Math.max(14, len * 0.3));
+  const spec = chipSpec(text, at.x + (dx / len) * off, at.y + (dy / len) * off, theme, {
     fill: theme.bgAlt,
     stroke: theme.strokeSoft,
     text: theme.media[media] ?? theme.textMuted,
@@ -258,6 +277,8 @@ function portChip(text, at, toward, theme, media) {
     // A vertical cable leaves its label free to slide horizontally.
     axis: Math.abs(dy) >= Math.abs(dx) ? 'y' : 'x',
   });
+  offsetOffCable(spec, dx, dy);
+  return spec;
 }
 
 function chipSpec(text, cx, cy, theme, { fill, stroke, text: color, size, mono, axis }) {
@@ -436,7 +457,7 @@ function dataCard(n, box, theme, interactive) {
 
 /* ---- legend and title block ------------------------------------------ */
 
-function legendRow(graph, theme, x, y) {
+export function legendRow(graph, theme, x, y) {
   let cx = x;
   const items = graph.legend.map((l) => {
     const color = theme.media[l.kind] ?? theme.role[l.kind] ?? theme.textMuted;
@@ -452,7 +473,7 @@ function legendRow(graph, theme, x, y) {
   return `<g class="nd-legend">${items.join('')}</g>`;
 }
 
-function titleBlockEl(graph, theme, x, y, w, placed) {
+export function titleBlockEl(graph, theme, x, y, w, placed) {
   const meta = graph.meta ?? {};
   const cells = [
     ['LAYER', graph.layer.toUpperCase()],
@@ -493,7 +514,7 @@ function titleBlockEl(graph, theme, x, y, w, placed) {
 
 /* ---- geometry -------------------------------------------------------- */
 
-function roundedPath(pts, radius) {
+export function roundedPath(pts, radius) {
   if (pts.length === 2) return `M${r(pts[0].x)} ${r(pts[0].y)} L${r(pts[1].x)} ${r(pts[1].y)}`;
   let d = `M${r(pts[0].x)} ${r(pts[0].y)}`;
   for (let i = 1; i < pts.length - 1; i++) {
@@ -523,17 +544,21 @@ function midpointOf(pts) {
   let half = total / 2;
   for (let i = 1; i < pts.length; i++) {
     const seg = dist(pts[i - 1], pts[i]);
-    if (half <= seg) return along(pts[i - 1], pts[i], half);
+    if (half <= seg) {
+      const p = along(pts[i - 1], pts[i], half);
+      return { ...p, dx: pts[i].x - pts[i - 1].x, dy: pts[i].y - pts[i - 1].y };
+    }
     half -= seg;
   }
-  return pts[Math.floor(pts.length / 2)];
+  const i = Math.floor(pts.length / 2);
+  return { ...pts[i], dx: 1, dy: 0 };
 }
 
 function truncate(s, n) {
   const t = String(s ?? '');
   return t.length > n ? `${t.slice(0, n - 1)}…` : t;
 }
-function r(n) {
+export function r(n) {
   return Math.round(n * 100) / 100;
 }
 export function esc(s) {

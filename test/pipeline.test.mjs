@@ -9,6 +9,7 @@ import { deriveLayer, LAYERS } from '../src/model/derive.mjs';
 import { layoutGraph, groupHulls } from '../src/layout/index.mjs';
 import { freezeLayout } from '../src/layout/freeze.mjs';
 import { renderSvg } from '../src/render2d/svg.mjs';
+import { renderIsometric } from '../src/render2d/isometric.mjs';
 import { getTheme, THEME_IDS } from '../src/theme/themes.mjs';
 
 const EXAMPLE = new URL('../examples/iac-lab.netdia.yaml', import.meta.url).pathname;
@@ -217,4 +218,88 @@ function countTags(s, tag) {
 }
 function countCloseTags(s, tag) {
   return (s.match(new RegExp(`</${tag}>`, 'g')) ?? []).length;
+}
+
+/* ---- isometric L1 ----------------------------------------------------- */
+
+test('isometric draws one slab per device and keeps every cable', async () => {
+  const g = deriveLayer(model, 'l1');
+  const p = await layoutGraph(g);
+  const svg = renderIsometric(g, p, getTheme('signal'));
+  assert.equal(countMatches(svg, /class="nd-node"/g), g.nodes.length);
+  const drawn = new Set([...svg.matchAll(/data-edge="([^"]+)"/g)].map((m) => m[1]));
+  assert.equal(drawn.size, g.edges.length, 'every cable must appear at least once');
+});
+
+test('isometric renders well-formed SVG in every theme', async () => {
+  const g = deriveLayer(model, 'l1');
+  const p = await layoutGraph(g);
+  for (const id of THEME_IDS) {
+    const svg = renderIsometric(g, p, getTheme(id));
+    assert.match(svg, /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"/);
+    assert.ok(svg.endsWith('</svg>'));
+    assert.equal(countMatches(svg, /<g[ >]/g), countMatches(svg, /<\/g>/g), `${id} unbalanced <g>`);
+    assert.ok(svg.includes('SW-CORE-1'), id);
+  }
+});
+
+test('isometric content fits inside its viewBox', async () => {
+  const g = deriveLayer(model, 'l1');
+  const p = await layoutGraph(g);
+  const svg = renderIsometric(g, p, getTheme('signal'));
+  const [vw, vh] = svg.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/).slice(1).map(Number);
+  const start = svg.indexOf('<g class="nd-content"');
+  const end = svg.indexOf('<g class="nd-legend"');
+  const [ox, oy] = svg.slice(start).match(/translate\(([-\d.]+) ([-\d.]+)\)/).slice(1).map(Number);
+  const body = svg.slice(start, end);
+
+  let checked = 0;
+  for (const m of body.matchAll(/points="([^"]+)"/g)) {
+    for (const pt of m[1].split(' ')) {
+      const [x, y] = pt.split(',').map(Number);
+      assert.ok(x + ox >= -0.5 && x + ox <= vw + 0.5, `x ${x + ox} outside 0..${vw}`);
+      assert.ok(y + oy >= -0.5 && y + oy <= vh + 0.5, `y ${y + oy} outside 0..${vh}`);
+      checked++;
+    }
+  }
+  assert.ok(checked > 40, `expected many points, got ${checked}`);
+});
+
+test('isometric keeps tier order along the depth axis', async () => {
+  // The core must sit behind the access switches, which sit behind the servers.
+  const g = deriveLayer(model, 'l1');
+  const p = await layoutGraph(g);
+  const svg = renderIsometric(g, p, getTheme('signal'));
+  const order = [...svg.matchAll(/data-node="([^"]+)"/g)].map((m) => m[1]);
+  assert.ok(order.indexOf('sw-core-1') < order.indexOf('sw-acc-1'));
+  assert.ok(order.indexOf('sw-acc-1') < order.indexOf('srv-git-1'));
+});
+
+test('isometric drops zone plates rather than drawing overlapping floors', async () => {
+  // Two zones interleaved across the same tier cannot both own that ground.
+  const m = parseModel(`
+meta: { title: T }
+zones:
+  - { id: a, kind: trust }
+  - { id: b, kind: dmz }
+devices:
+  - { id: sw, role: core, zone: a, interfaces: [{ name: p1 }, { name: p2 }, { name: p3 }] }
+  - { id: s1, role: server, zone: a, interfaces: [{ name: e0 }] }
+  - { id: s2, role: server, zone: b, interfaces: [{ name: e0 }] }
+  - { id: s3, role: server, zone: a, interfaces: [{ name: e0 }] }
+links:
+  - { a: "sw:p1", b: "s1:e0" }
+  - { a: "sw:p2", b: "s2:e0" }
+  - { a: "sw:p3", b: "s3:e0" }
+`);
+  const g = deriveLayer(m, 'l1');
+  const p = await layoutGraph(g);
+  const svg = renderIsometric(g, p, getTheme('signal'));
+  assert.equal(countMatches(svg, /class="nd-zone"/g), 0, 'interleaved zones must not draw plates');
+  // The zone is still reported, as text on the slab.
+  assert.ok(svg.includes('· b'), 'zone must fall back to a text badge');
+});
+
+function countMatches(s, re) {
+  return (s.match(re) ?? []).length;
 }

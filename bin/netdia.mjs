@@ -6,6 +6,7 @@ import { validateModel, formatDiagnostics } from '../src/model/validate.mjs';
 import { deriveLayer, LAYERS } from '../src/model/derive.mjs';
 import { layoutGraph } from '../src/layout/index.mjs';
 import { renderSvg } from '../src/render2d/svg.mjs';
+import { renderIsometric } from '../src/render2d/isometric.mjs';
 import { getTheme, THEMES, THEME_IDS, DEFAULT_THEME } from '../src/theme/themes.mjs';
 import { renderViewer } from '../src/viewer/build.mjs';
 import { freezeLayout } from '../src/layout/freeze.mjs';
@@ -14,7 +15,8 @@ const USAGE = `netdia — professional L1/L2/L3 network diagrams from one model
 
   netdia validate <model.yaml> [--json]
   netdia svg      <model.yaml> --layer l1|l2|l3 [-o file.svg] [--theme <id>]
-  netdia render   <model.yaml> [-o file.html] [--theme <id>] [--no-3d]
+  netdia iso      <model.yaml> [-o file.svg] [--theme <id>]
+  netdia render   <model.yaml> [-o file.html] [--theme <id>] [--no-3d] [--no-iso]
   netdia freeze   <model.yaml> [--layer l1|l2|l3|all] [--reset]
   netdia themes
 
@@ -56,6 +58,7 @@ async function main() {
   switch (cmd) {
     case 'validate': return cmdValidate();
     case 'svg': return cmdSvg();
+    case 'iso': return cmdIso();
     case 'render': return cmdRender();
     case 'freeze': return cmdFreeze();
     case 'themes': return cmdThemes();
@@ -113,6 +116,19 @@ async function cmdSvg() {
   console.log(`wrote ${out}  (${layer.toUpperCase()}, ${graph.nodes.length} nodes, ${graph.edges.length} edges, theme ${theme.id}, layout ${placed.source})`);
 }
 
+async function cmdIso() {
+  const { path, model } = requireModel();
+  checked(model, path);
+  const theme = getTheme(flags.theme ?? model.meta.theme);
+  const graph = deriveLayer(model, 'l1');
+  const placed = await layoutGraph(graph, { frozen: model.layout?.l1 });
+  const svg = renderIsometric(graph, placed, theme);
+
+  const out = flags.out ?? `out/${stem(path)}.iso.svg`;
+  write(out, svg);
+  console.log(`wrote ${out}  (isometric L1, ${graph.nodes.length} nodes, ${graph.edges.length} edges, theme ${theme.id}, layout ${placed.source})`);
+}
+
 async function cmdRender() {
   const { path, model } = requireModel();
   const result = checked(model, path);
@@ -123,6 +139,17 @@ async function cmdRender() {
     const graph = deriveLayer(model, layer);
     const placed = await layoutGraph(graph, { frozen: model.layout?.[layer] });
     layers.push({ graph, placed, svg: renderSvg(graph, placed, theme, { interactive: true, titleBlock: false }) });
+  }
+
+  // The isometric view is another way of reading L1, so it reuses L1's graph
+  // and inspector data and only swaps the drawing.
+  if (flags['no-iso'] !== true) {
+    const l1 = layers[0];
+    layers.push({
+      graph: { ...l1.graph, layer: 'iso', subtitle: 'Isometric physical view' },
+      placed: l1.placed,
+      svg: renderIsometric(l1.graph, l1.placed, theme, { interactive: true, titleBlock: false }),
+    });
   }
 
   const html = renderViewer({
@@ -137,7 +164,9 @@ async function cmdRender() {
   const out = flags.out ?? `out/${stem(path)}.html`;
   write(out, html);
   const kb = (Buffer.byteLength(html) / 1024).toFixed(0);
-  console.log(`wrote ${out}  (${kb} KB, theme ${theme.id}, 3D ${flags['no-3d'] === true ? 'off' : 'on'})`);
+  console.log(
+    `wrote ${out}  (${kb} KB, theme ${theme.id}, iso ${flags['no-iso'] === true ? 'off' : 'on'}, 3D ${flags['no-3d'] === true ? 'off' : 'on'})`,
+  );
   if (result.warnings.length) {
     console.log(`${result.warnings.length} warning(s):\n${formatDiagnostics({ errors: [], warnings: result.warnings })}`);
   }

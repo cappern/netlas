@@ -66,7 +66,7 @@ export function renderViewer({ model, layers, theme, enable3d = true, warnings =
       const n = graph.nodes.length;
       return (
         `<button class="nd-tab" role="tab" data-layer="${graph.layer}" aria-selected="false">` +
-        `<strong>${graph.layer.toUpperCase()}</strong>` +
+        `<strong>${graph.layer === 'iso' ? 'ISO' : graph.layer.toUpperCase()}</strong>` +
         `<span>${layerWord(graph.layer)}</span>` +
         `<em>${n}</em></button>`
       );
@@ -75,7 +75,7 @@ export function renderViewer({ model, layers, theme, enable3d = true, warnings =
 
   const tab3d = has3d
     ? `<button class="nd-tab" role="tab" data-layer="3d" aria-selected="false">` +
-      `<strong>3D</strong><span>Stack</span><em>${layers.length}</em></button>`
+      `<strong>3D</strong><span>Stack</span><em>${layers.filter((l) => l.graph.layer !== 'iso').length}</em></button>`
     : '';
 
   const views =
@@ -159,7 +159,7 @@ ${has3d ? `<script type="text/plain" id="nd-3d-src">${escapeScript(threeSrc)}</s
 }
 
 function layerWord(layer) {
-  return { l1: 'Physical', l2: 'VLANs', l3: 'Routing' }[layer] ?? layer;
+  return { l1: 'Physical', l2: 'VLANs', l3: 'Routing', iso: 'Isometric' }[layer] ?? layer;
 }
 
 /** Safe to embed inside <script type="application/json">. */

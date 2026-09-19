@@ -382,7 +382,9 @@
     var url = URL.createObjectURL(blob);
     import(url).then(function (mod) {
       scene3d = mod.createScene(document.getElementById('nd-canvas3d'), {
-        layers: P.layers.filter(function (l) { return l.id !== '3d'; }),
+        // Only the three real layers become floors; the isometric tab is
+        // another drawing of L1, not a fourth layer.
+        layers: P.layers.filter(function (l) { return ['l1', 'l2', 'l3'].indexOf(l.id) !== -1; }),
         theme: P.theme,
       });
       window.NETDIA_SCENE = scene3d;
