@@ -97,6 +97,10 @@ Layout is automatic by default. Nodes are partitioned into tiers by role, so
 the drawing reads top-to-bottom the way an engineer thinks rather than the way
 a graph solver would arrange it.
 
+Node spacing is set wide enough that two neighbouring devices in different
+security zones leave a visible gutter between their zone boxes — zones that
+touch read as one merged region.
+
 When automatic placement is not good enough:
 
 ```bash
@@ -140,6 +144,16 @@ bounding box that is mostly empty. The grid keeps the two facts that carry
 meaning — which tier a device sits in, and its left-to-right order within that
 tier — and drops only the pixel spacing, which carried none.
 
+Devices wear a real chassis rather than a flat icon. Detail is drawn *into*
+the isometric faces through a transform in face-local units, so a switch shows
+a port row coloured by each cable's actual media, a firewall shows brick
+courses, a server shows drive bays and storage shows drive carriers. A 2D glyph
+pasted onto a 3D solid is what makes a drawing look assembled rather than
+designed, so there isn't one — role is carried by the shape of the box.
+
+The port row reads from the same `usedPorts()` the flat view's port strip uses,
+so the faceplate and the strip cannot drift apart.
+
 Zone floor plates are drawn only when they do not overlap. Grid rows follow
 tiers, not zones, so a zone's members are not always contiguous; two
 overlapping plates would claim a device stands in both zones at once. When
@@ -164,7 +178,7 @@ copies, which is the one thing a flat diagram cannot show: that the cable in
 L1, the VLAN in L2 and the gateway in L3 are the same box in the rack.
 
 three.js is inlined but lazy-loaded, so 2D opens instantly. It costs about
-530 KB of the ~715 KB example file; `--no-3d` brings that to ~180 KB, and
+530 KB of the ~720 KB example file; `--no-3d` brings that to ~185 KB, and
 `--no-iso` drops the isometric drawing as well.
 
 ## Icons
@@ -180,10 +194,11 @@ is carried by a short text mark, which is accurate and unrestricted.
 npm test
 ```
 
-35 tests covering validation rules, layer derivation, tier ordering, zone-hull
-and zone-plate fallbacks, SVG well-formedness in every theme, XML escaping,
-viewBox containment for both the flat and isometric renderers, isometric depth
-ordering, and freeze round-trips.
+38 tests covering validation rules, layer derivation, tier ordering, zone-hull
+and zone-plate fallbacks, minimum zone gutters on each axis, SVG
+well-formedness in every theme, XML escaping, viewBox containment for both
+renderers, isometric depth ordering, face-matrix orientation, faceplate/port
+agreement between the two views, and freeze round-trips.
 
 ## Layout of the repository
 

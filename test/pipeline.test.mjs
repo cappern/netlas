@@ -8,7 +8,7 @@ import { validateModel } from '../src/model/validate.mjs';
 import { deriveLayer, LAYERS } from '../src/model/derive.mjs';
 import { layoutGraph, groupHulls } from '../src/layout/index.mjs';
 import { freezeLayout } from '../src/layout/freeze.mjs';
-import { renderSvg } from '../src/render2d/svg.mjs';
+import { renderSvg, usedPorts } from '../src/render2d/svg.mjs';
 import { renderIsometric } from '../src/render2d/isometric.mjs';
 import { getTheme, THEME_IDS } from '../src/theme/themes.mjs';
 
@@ -303,3 +303,73 @@ links:
 function countMatches(s, re) {
   return (s.match(re) ?? []).length;
 }
+
+test('zone hulls keep a visible gutter on both axes', async () => {
+  // Two zones that touch read as one merged region. The two axes are checked
+  // separately because the hull adds a label-pill allowance on top of its
+  // padding only at the top edge, which caps the vertical gutter
+  // independently of the horizontal one.
+  const MIN_GUTTER = 32;
+  const g = deriveLayer(model, 'l1');
+  const p = await layoutGraph(g);
+  const { hulls, usable } = groupHulls(g, p);
+  assert.equal(usable, true, 'L1 zone hulls must be drawable');
+  assert.ok(hulls.length >= 2, 'need at least two zones to compare');
+
+  for (let i = 0; i < hulls.length; i++) {
+    for (let j = i + 1; j < hulls.length; j++) {
+      const a = hulls[i];
+      const b = hulls[j];
+      const xGap = Math.max(b.x - (a.x + a.w), a.x - (b.x + b.w));
+      const yGap = Math.max(b.y - (a.y + a.h), a.y - (b.y + b.h));
+      // Separation on either axis is enough to keep them visually distinct.
+      const separation = Math.max(xGap, yGap);
+      assert.ok(
+        separation >= MIN_GUTTER,
+        `${a.id} and ${b.id} are only ${Math.round(separation)}px apart ` +
+          `(x ${Math.round(xGap)}, y ${Math.round(yGap)}); need ${MIN_GUTTER}`,
+      );
+    }
+  }
+});
+
+test('isometric chassis detail is drawn into the faces, not pasted on top', async () => {
+  const g = deriveLayer(model, 'l1');
+  const p = await layoutGraph(g);
+  const svg = renderIsometric(g, p, getTheme('signal'));
+
+  // One group per drawn face. Every device except the internet cloud wears a
+  // chassis, and each wears exactly two: the lid seam and the front panel.
+  const faces = [...svg.matchAll(/<g transform="matrix\(([^)]+)\)">/g)];
+  const chassisWearing = g.nodes.filter((n) => n.role !== 'internet' && n.role !== 'wan').length;
+  assert.equal(faces.length, chassisWearing * 2, 'each chassis contributes a lid and a front');
+
+  // Every face matrix must have a positive determinant, or asymmetric detail
+  // renders mirrored on that face.
+  for (const f of faces) {
+    const [a, b, c, d] = f[1].trim().split(/[\s,]+/).map(Number);
+    assert.ok(a * d - c * b > 0.0001, `mirrored face matrix: ${f[1]}`);
+  }
+
+  // Face content must not use `points=`: it lives in face-local coordinates,
+  // and the viewBox test reads `points=` values as global ones.
+  for (const m of svg.matchAll(/<g transform="matrix\([^)]+\)">(.*?)<\/g>/gs)) {
+    assert.ok(!m[1].includes('points='), 'face kits must use rect/path, never points=');
+  }
+});
+
+test('a switch faceplate shows the same ports as the flat port strip', async () => {
+  const g = deriveLayer(model, 'l1');
+  const p = await layoutGraph(g);
+  const core = g.nodes.find((n) => n.id === 'sw-core-1');
+  const ports = usedPorts(core, g);
+  assert.equal(ports.length, 4, 'sw-core-1 has four cabled ports in the example');
+
+  const svg = renderIsometric(g, p, getTheme('signal'));
+  const theme = getTheme('signal');
+  const group = svg.match(/data-node="sw-core-1".*?(?=data-node="|<\/svg>)/s)[0];
+  // Each cabled port is filled with its cable's media colour.
+  for (const media of new Set(ports.map((x) => x.media))) {
+    assert.ok(group.includes(theme.media[media]), `faceplate missing ${media} colour`);
+  }
+});

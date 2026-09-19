@@ -28,7 +28,12 @@ export const LAYOUT_DEFAULTS = {
   'elk.algorithm': 'layered',
   'elk.direction': 'DOWN',
   'elk.layered.spacing.nodeNodeBetweenLayers': '96',
-  'elk.spacing.nodeNode': '52',
+  // Wide enough that two neighbouring nodes in different security zones leave
+  // a visible gutter between their zone hulls. Hull padding is 20 per side, so
+  // this yields a 40px horizontal gutter; the vertical gutter works out at 38
+  // once the hull's label-pill allowance is taken off. Keeping the two axes
+  // close to equal is what stops zones reading as one merged region.
+  'elk.spacing.nodeNode': '80',
   'elk.spacing.edgeNode': '28',
   'elk.spacing.edgeEdge': '16',
   'elk.layered.spacing.edgeNodeBetweenLayers': '32',
@@ -174,7 +179,7 @@ export function orthoRoute(a, b) {
  * Bounding hulls for groups, plus an honest verdict on whether they can be
  * drawn as containers at all.
  */
-export function groupHulls(graph, placed, pad = 26) {
+export function groupHulls(graph, placed, pad = 20) {
   const hulls = [];
   for (const g of graph.groups) {
     const boxes = g.nodes.map((id) => placed.nodes.get(id)).filter(Boolean);

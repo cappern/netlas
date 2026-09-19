@@ -1,6 +1,6 @@
-import { icon, VENDOR_MARK } from './icons.mjs';
+import { VENDOR_MARK } from './icons.mjs';
 import { dashFor, weightFor, DATA_FONT } from '../theme/themes.mjs';
-import { defs, background, legendRow, titleBlockEl, esc, r } from './svg.mjs';
+import { defs, background, legendRow, titleBlockEl, esc, r, usedPorts } from './svg.mjs';
 import { orthoRoute } from '../layout/index.mjs';
 
 /**
@@ -26,7 +26,7 @@ const COS30 = Math.cos(Math.PI / 6);
 const SIN30 = 0.5;
 
 const SLAB = 26; // device height in layout units
-const CELL_W = 210; // grid pitch across a tier
+const CELL_W = 230; // grid pitch across a tier
 const CELL_D = 132; // grid pitch between tiers
 const FOOT_W = 150; // device footprint
 const FOOT_D = 62;
@@ -100,7 +100,7 @@ export function renderIsometric(graph, flatPlaced, theme, opts = {}) {
   }
   for (const n of graph.nodes) {
     const box = placed.nodes.get(n.id);
-    if (box) items.push(slab(n, box, theme, interactive, { zoneBadge: !platesDrawn }));
+    if (box) items.push(slab(n, box, theme, interactive, { zoneBadge: !platesDrawn, graph }));
   }
 
   items.sort((a, b) => a.depth - b.depth);
@@ -157,7 +157,7 @@ function zonePlates(graph, placed, theme) {
   graph.groups.forEach((g, i) => {
     const boxes = g.nodes.map((id) => placed.nodes.get(id)).filter(Boolean);
     if (boxes.length === 0) return;
-    const pad = 30;
+    const pad = 20;
     plates.push({
       group: g,
       index: i,
@@ -233,7 +233,10 @@ function cableSegments(e, pts, theme) {
     const pa = project(a.x, a.y, z);
     const pb = project(b.x, b.y, z);
     out.push({
-      depth: (a.x + a.y + b.x + b.y) / 2,
+      // Depth is the nearest extent along the viewing axis, the same
+      // convention slabs use. A centroid here would sort a long cable against
+      // a slab's near corner on a different scale and occlude wrongly.
+      depth: Math.max(a.x + a.y, b.x + b.y),
       bbox: [Math.min(pa.x, pb.x), Math.min(pa.y, pb.y), Math.max(pa.x, pb.x), Math.max(pa.y, pb.y)],
       svg:
         `<g class="nd-edge" data-edge="${esc(e.id)}" data-a="${esc(e.a)}" data-b="${esc(e.b)}" ` +
@@ -247,9 +250,212 @@ function cableSegments(e, pts, theme) {
   return out;
 }
 
+/* ---- chassis faces ----------------------------------------------------- */
+
+/**
+ * Map a face-local coordinate system onto one of the slab's visible faces.
+ *
+ * Face-local units are the same units as the rest of the drawing — `u` runs
+ * along the face's width, `v` runs downward from its top edge — so the matrix
+ * scale stays at cos(30°) and an ordinary `stroke-width` still means roughly
+ * one pixel. Authoring kits in a 0..1 unit square would scale strokes by the
+ * face width and squash circles into 6:1 ellipses.
+ *
+ * Every matrix has a positive determinant. The east face takes its origin at
+ * the near corner and runs `u` away from the viewer for exactly that reason;
+ * anchoring it at the far corner mirrors anything asymmetric.
+ */
+function faceTransform(face, x, y, w, h, height) {
+  let o;
+  switch (face) {
+    case 'south':
+      o = project(x, y + h, height);
+      return `matrix(${r(COS30)} ${r(SIN30)} 0 1 ${r(o.x)} ${r(o.y)})`;
+    case 'east':
+      o = project(x + w, y + h, height);
+      return `matrix(${r(COS30)} ${r(-SIN30)} 0 1 ${r(o.x)} ${r(o.y)})`;
+    case 'top':
+      o = project(x, y, height);
+      return `matrix(${r(COS30)} ${r(SIN30)} ${r(-COS30)} ${r(SIN30)} ${r(o.x)} ${r(o.y)})`;
+    default:
+      throw new Error(`Unknown face "${face}"`);
+  }
+}
+
+/** Which chassis a role wears. */
+function kitFor(role) {
+  switch (role) {
+    case 'core':
+    case 'distribution':
+    case 'access':
+    case 'wireless':
+    case 'router':
+    case 'loadbalancer':
+      return 'ports';
+    case 'firewall':
+      return 'firewall';
+    case 'server':
+    case 'hypervisor':
+    case 'container':
+    case 'service':
+      return 'server';
+    case 'storage':
+      return 'storage';
+    case 'client':
+      return 'client';
+    case 'internet':
+    case 'wan':
+      return 'none';
+    default:
+      return 'vents';
+  }
+}
+
+/**
+ * Chassis detail drawn into the front face.
+ *
+ * Kit content uses `<rect>` and `<path>` only, never a `points=` attribute:
+ * the geometry lives inside a transformed group, and the viewBox test reads
+ * `points=` values as though they were global coordinates.
+ */
+function frontFace(n, graph, theme, box, height) {
+  const { x, y, w, h } = box;
+  const kit = kitFor(n.role);
+  if (kit === 'none') return '';
+
+  const accent = theme.role[n.role] ?? theme.textMuted;
+  const line = theme.strokeStrong;
+  const faint = theme.textFaint;
+  const inset = 9;
+  const usable = w - inset * 2;
+  const parts = [];
+
+  if (kit === 'ports') {
+    // The faceplate carries the same data as the flat view's port strip: one
+    // port per cabled interface, coloured by the media on that cable.
+    const used = usedPorts(n, graph);
+    const pw = 9;
+    const gap = 3.5;
+    const max = Math.max(1, Math.floor((usable + gap) / (pw + gap)));
+    const shown = used.slice(0, max);
+    const rows = shown.length ? 1 : 0;
+    const py = height / 2 - 3;
+
+    shown.forEach((p, i) => {
+      const c = theme.media[p.media] ?? faint;
+      parts.push(
+        `<rect x="${r(inset + i * (pw + gap))}" y="${r(py)}" width="${pw}" height="6" rx="1" fill="${c}"/>`,
+      );
+    });
+    // Empty bays for the rest of the faceplate, so a lightly cabled switch
+    // still looks like a switch rather than a bare box.
+    const empty = Math.max(0, Math.min(max, 8) - shown.length);
+    for (let i = 0; i < empty; i++) {
+      const at = inset + (shown.length + i) * (pw + gap);
+      parts.push(
+        `<rect x="${r(at)}" y="${r(py)}" width="${pw}" height="6" rx="1" fill="none" ` +
+          `stroke="${faint}" stroke-width="0.8" stroke-opacity="0.65"/>`,
+      );
+    }
+    if (rows) {
+      parts.push(
+        `<rect x="${r(w - inset - 3)}" y="${r(height / 2 - 1.5)}" width="3" height="3" rx="1.5" fill="${accent}"/>`,
+      );
+    }
+  } else if (kit === 'firewall') {
+    // Brick courses, the same identity the flat view's firewall glyph uses.
+    const courses = 3;
+    const bh = (height - 8) / courses;
+    for (let c = 0; c < courses; c++) {
+      const by = 4 + c * bh;
+      const offset = c % 2 ? -14 : 0;
+      for (let bx = inset + offset; bx < w - inset; bx += 28) {
+        const x0 = Math.max(inset, bx);
+        const x1 = Math.min(w - inset, bx + 26);
+        if (x1 - x0 < 4) continue;
+        parts.push(
+          `<rect x="${r(x0)}" y="${r(by)}" width="${r(x1 - x0)}" height="${r(bh - 2)}" rx="1" ` +
+            `fill="none" stroke="${accent}" stroke-width="0.9" stroke-opacity="0.8"/>`,
+        );
+      }
+    }
+  } else if (kit === 'server') {
+    // Two drive bays and a status light: a 2U chassis, front on.
+    const bh = 6;
+    for (let i = 0; i < 2; i++) {
+      const by = height / 2 - bh - 1 + i * (bh + 2);
+      parts.push(
+        `<rect x="${r(inset)}" y="${r(by)}" width="${r(usable - 16)}" height="${bh}" rx="1" ` +
+          `fill="none" stroke="${line}" stroke-width="1" stroke-opacity="0.95"/>`,
+      );
+      parts.push(
+        `<rect x="${r(inset + 3)}" y="${r(by + 1.6)}" width="18" height="2.8" rx="1.4" ` +
+          `fill="${line}" fill-opacity="0.8"/>`,
+      );
+    }
+    parts.push(
+      `<rect x="${r(w - inset - 3)}" y="${r(height / 2 - 1.5)}" width="3" height="3" rx="1.5" fill="${accent}"/>`,
+    );
+  } else if (kit === 'storage') {
+    // A grid of drive carriers.
+    const cols = Math.max(4, Math.min(7, Math.floor(usable / 18)));
+    const cw = usable / cols;
+    const bh = (height - 10) / 2;
+    for (let c = 0; c < cols; c++) {
+      for (let row = 0; row < 2; row++) {
+        parts.push(
+          `<rect x="${r(inset + c * cw + 1)}" y="${r(5 + row * (bh + 1))}" ` +
+            `width="${r(cw - 2.5)}" height="${r(bh - 1)}" rx="0.8" fill="none" ` +
+            `stroke="${accent}" stroke-width="0.8" stroke-opacity="0.7"/>`,
+        );
+      }
+    }
+  } else if (kit === 'client') {
+    // A screen on a stand, seen front on.
+    const sw = usable * 0.62;
+    const sh = height - 10;
+    const sx = (w - sw) / 2;
+    parts.push(
+      `<rect x="${r(sx)}" y="4" width="${r(sw)}" height="${r(sh)}" rx="1.5" fill="none" ` +
+        `stroke="${line}" stroke-width="1" stroke-opacity="0.85"/>`,
+      `<rect x="${r(sx + 3)}" y="6.5" width="${r(sw - 6)}" height="${r(sh - 5)}" rx="1" ` +
+        `fill="${accent}" fill-opacity="0.18"/>`,
+    );
+  } else {
+    // Generic ventilation slots.
+    for (let i = 0; i < 3; i++) {
+      const vy = height / 2 - 5 + i * 4;
+      parts.push(
+        `<path d="M${r(inset)} ${r(vy)} H${r(w - inset)}" stroke="${faint}" ` +
+          `stroke-width="0.9" stroke-opacity="0.7"/>`,
+      );
+    }
+  }
+
+  if (parts.length === 0) return '';
+  return `<g transform="${faceTransform('south', x, y, w, h, height)}">${parts.join('')}</g>`;
+}
+
+/**
+ * A seam inset from the edge of the lid. Vent slots were the obvious choice
+ * and they collided with the device label, which sits on this same face; a
+ * seam reads as a machined panel from any angle and cannot fight the text.
+ */
+function topFace(n, theme, box, height) {
+  const { x, y, w, h } = box;
+  if (kitFor(n.role) === 'none') return '';
+  const inset = 6;
+  return (
+    `<g transform="${faceTransform('top', x, y, w, h, height)}">` +
+    `<rect x="${inset}" y="${inset}" width="${r(w - inset * 2)}" height="${r(h - inset * 2)}" ` +
+    `rx="2" fill="none" stroke="${theme.textFaint}" stroke-width="0.8" stroke-opacity="0.35"/>` +
+    `</g>`
+  );
+}
+
 /* ---- device slabs ------------------------------------------------------ */
 
-function slab(n, box, theme, interactive, { zoneBadge = false } = {}) {
+function slab(n, box, theme, interactive, { zoneBadge = false, graph } = {}) {
   const { x, y, w, h } = box;
   const accent = theme.role[n.role] ?? theme.textMuted;
   const isData = n.kind !== 'device';
@@ -287,47 +493,48 @@ function slab(n, box, theme, interactive, { zoneBadge = false } = {}) {
     `<polygon points="${poly(top)}" fill="${theme.surface}" stroke="${theme.stroke}" stroke-width="1"/>` +
     // Accent along the leading edge of the top face: the same role cue the
     // flat view puts on the card's left rail.
-    `<path d="M${r(top[3].x)} ${r(top[3].y)} L${r(top[2].x)} ${r(top[2].y)}" stroke="${accent}" stroke-width="3"/>` +
-    // Grounding shadow so a slab does not appear to float off its plate.
-    '';
+    `<path d="M${r(top[3].x)} ${r(top[3].y)} L${r(top[2].x)} ${r(top[2].y)}" stroke="${accent}" stroke-width="3"/>`;
+
+  // Role is carried by the shape of the chassis itself — a port row, brick
+  // courses, drive bays — rather than by a flat icon pasted onto a solid. A
+  // 2D glyph sitting on an isometric object is what makes a drawing look
+  // assembled rather than designed.
+  const chassis = isData || !graph ? '' : topFace(n, theme, box, height) + frontFace(n, graph, theme, box, height);
 
   // Text stays screen-aligned. Skewing labels into the isometric plane looks
   // clever for one screenshot and is unreadable in every other situation.
   const label = isData
     ? `<text x="${r(centre.x)}" y="${r(centre.y + 3)}" text-anchor="middle" font-size="11.5" ` +
       `font-weight="650" font-family="${esc(DATA_FONT)}" fill="${theme.text}">${esc(n.label)}</text>`
-    : `<text x="${r(centre.x + 14)}" y="${r(centre.y - 1)}" text-anchor="middle" font-size="12" ` +
+    : `<text x="${r(centre.x)}" y="${r(centre.y - 1)}" text-anchor="middle" font-size="12" ` +
       `font-weight="650" font-family="${esc(theme.fontDisplay)}" fill="${theme.text}">` +
       `${esc(theme.uppercase ? n.label.toUpperCase() : n.label)}</text>` +
       (sub
-        ? `<text x="${r(centre.x + 14)}" y="${r(centre.y + 11)}" text-anchor="middle" font-size="9" ` +
+        ? `<text x="${r(centre.x)}" y="${r(centre.y + 11)}" text-anchor="middle" font-size="9" ` +
           `fill="${theme.textMuted}">${esc(sub)}</text>`
         : '') +
       (vendor
-        ? `<text x="${r(centre.x + 14)}" y="${r(centre.y - 13)}" text-anchor="middle" font-size="7.5" ` +
+        ? `<text x="${r(centre.x)}" y="${r(centre.y - 13)}" text-anchor="middle" font-size="7.5" ` +
           `font-weight="600" letter-spacing="0.12em" fill="${theme.textFaint}">${esc(vendor)}</text>`
         : '');
-
-  const glyph = isData
-    ? ''
-    : icon(n.role, centre.x - w * 0.38, centre.y - 11, 20, accent, theme.strokeWidth);
 
   const xs = [...top, ...south, ...east];
   // Labels are screen-aligned and overhang the slab they belong to, so the
   // bounds have to account for the text, not just the polygon.
   const textW = Math.max(n.label.length, sub.length * 0.8) * 7 + 30;
   return {
-    depth: x + y + w + h,
+    // Nearest extent along the viewing axis; cables use the same measure.
+    depth: x + w + y + h,
     bbox: [
-      Math.min(Math.min(...xs.map((p) => p.x)), centre.x + 14 - textW / 2),
+      Math.min(Math.min(...xs.map((p) => p.x)), centre.x - textW / 2),
       Math.min(...xs.map((p) => p.y)) - 24,
-      Math.max(Math.max(...xs.map((p) => p.x)), centre.x + 14 + textW / 2),
+      Math.max(Math.max(...xs.map((p) => p.x)), centre.x + textW / 2),
       Math.max(...xs.map((p) => p.y)),
     ],
     svg:
       `<g class="nd-node" data-node="${esc(n.id)}" data-role="${esc(n.role)}"${
         interactive ? ' tabindex="0"' : ''
-      }>${body}${glyph}${label}</g>`,
+      }>${body}${chassis}${label}</g>`,
     projected: true,
   };
 }

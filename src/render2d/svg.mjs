@@ -379,11 +379,23 @@ function deviceCard(n, box, graph, theme, { zoneBadge, interactive }) {
  * coloured by the media on that cable. Reading it tells you how many ports
  * are in use and whether they are copper, fiber or virtual.
  */
-function portStrip(n, graph, box, theme) {
-  const used = graph.edges
-    .filter((e) => e.a === n.id || e.b === n.id)
-    .map((e) => ({ port: e.a === n.id ? e.aPort : e.bPort, media: e.media }))
+/**
+ * The cabled ports of a device, in graph order, with the media of the cable
+ * on each one.
+ *
+ * Shared with the isometric renderer, where the same list becomes the ports
+ * on the front of the chassis. Both views have to read the faceplate from one
+ * place or they will drift apart the first time either is touched.
+ */
+export function usedPorts(node, graph) {
+  return graph.edges
+    .filter((e) => e.a === node.id || e.b === node.id)
+    .map((e) => ({ port: e.a === node.id ? e.aPort : e.bPort, media: e.media }))
     .filter((p) => p.port);
+}
+
+function portStrip(n, graph, box, theme) {
+  const used = usedPorts(n, graph);
   if (used.length === 0) return '';
 
   const segW = 9;
