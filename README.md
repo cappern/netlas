@@ -72,9 +72,15 @@ Roles: `internet wan router firewall loadbalancer core distribution access
 wireless server hypervisor storage container service client appliance`.
 Media: `copper fiber virtual wireless wan console`.
 
-See `examples/iac-lab.netdia.yaml` for a complete lab with Palo Alto and Cisco
-firewalls, Cisco switches, Windows and Linux servers, a hypervisor and a Git
-host.
+Two worked examples ship with the project:
+
+| File | Scale | Purpose |
+|---|---|---|
+| `examples/iac-lab.netdia.yaml` | 11 devices | A lab: Palo Alto and Cisco firewalls, Cisco switches, Windows and Linux servers, a hypervisor, a Git host |
+| `examples/enterprise-dc.netdia.yaml` | 59 devices, 68 links, 16 VLANs | A redundant data centre: dual WAN, HA perimeter, two cores, four distribution and four leaf switches, twelve access switches, hypervisors, storage, DMZ |
+
+The larger example exists to exercise layout, labelling and zoning at scale;
+it is covered by its own test file.
 
 ## Validation
 
@@ -100,6 +106,14 @@ a graph solver would arrange it.
 Node spacing is set wide enough that two neighbouring devices in different
 security zones leave a visible gutter between their zone boxes — zones that
 touch read as one merged region.
+
+A tier wider than eight devices is wrapped onto extra rows. A server farm is
+one tier by role, and drawing two dozen hosts as a single row produces a
+diagram several times wider than it is tall, legible only by panning. Members
+are ordered by their upstream neighbour before wrapping, so the hosts on one
+leaf switch stay together instead of being scattered by declaration order. The
+isometric view inherits this for free, because it derives its rows from the
+flat layout.
 
 When automatic placement is not good enough:
 
@@ -194,11 +208,13 @@ is carried by a short text mark, which is accurate and unrestricted.
 npm test
 ```
 
-38 tests covering validation rules, layer derivation, tier ordering, zone-hull
+43 tests covering validation rules, layer derivation, tier ordering, zone-hull
 and zone-plate fallbacks, minimum zone gutters on each axis, SVG
 well-formedness in every theme, XML escaping, viewBox containment for both
 renderers, isometric depth ordering, face-matrix orientation, faceplate/port
-agreement between the two views, and freeze round-trips.
+agreement between the two views, freeze round-trips, and a scale suite that
+holds the 59-device example to a readable aspect ratio with no dropped nodes
+or edges.
 
 ## Layout of the repository
 

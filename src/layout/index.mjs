@@ -24,6 +24,17 @@ export const NODE_H = 76;
 export const NET_W = 172;
 export const NET_H = 62;
 
+/**
+ * How many nodes a single tier may hold before it is wrapped onto extra rows.
+ *
+ * A server farm with two dozen hosts is one tier by role, and drawing it as
+ * one row produces a diagram several times wider than it is tall — legible
+ * only by panning. Wrapping trades a little vertical height for an aspect
+ * ratio a reader can actually take in. The isometric view inherits this for
+ * free, because it derives its rows from the flat layout's y coordinate.
+ */
+export const MAX_TIER_WIDTH = 8;
+
 export const LAYOUT_DEFAULTS = {
   'elk.algorithm': 'layered',
   'elk.direction': 'DOWN',
@@ -76,13 +87,15 @@ export async function layoutGraph(graph, { frozen = null, options = {} } = {}) {
     throw err;
   }
 
+  const partition = tierPartitions(graph);
+
   const elkNodes = graph.nodes.map((n) => {
     const s = sizes.get(n.id);
     return {
       id: n.id,
       width: s.w,
       height: s.h,
-      layoutOptions: { 'elk.partitioning.partition': String(n.tier ?? 5) },
+      layoutOptions: { 'elk.partitioning.partition': String(partition.get(n.id)) },
     };
   });
 
@@ -116,6 +129,58 @@ export async function layoutGraph(graph, { frozen = null, options = {} } = {}) {
     height: result.height ?? 0,
     source: 'auto',
   };
+}
+
+/**
+ * Map every node to an ELK partition, splitting any tier wider than
+ * MAX_TIER_WIDTH across consecutive partitions so it wraps onto extra rows.
+ *
+ * Members are ordered by their upstream neighbour before being chunked, so a
+ * wrapped tier keeps siblings together: the hosts hanging off one leaf switch
+ * land on the same row instead of being scattered by declaration order.
+ *
+ * Tiers are multiplied out to leave room for the sub-rows while preserving
+ * the original top-to-bottom order between tiers.
+ */
+function tierPartitions(graph) {
+  const SPREAD = 100;
+  const tierOf = (n) => n.tier ?? 5;
+
+  const byTier = new Map();
+  for (const n of graph.nodes) {
+    const t = tierOf(n);
+    if (!byTier.has(t)) byTier.set(t, []);
+    byTier.get(t).push(n);
+  }
+
+  // Each node's upstream anchor: the neighbour sitting closest to the top.
+  const anchor = new Map();
+  for (const n of graph.nodes) {
+    const neighbours = graph.edges
+      .filter((e) => e.a === n.id || e.b === n.id)
+      .map((e) => graph.nodes.find((x) => x.id === (e.a === n.id ? e.b : e.a)))
+      .filter(Boolean)
+      .filter((x) => tierOf(x) < tierOf(n))
+      .sort((a, b) => tierOf(a) - tierOf(b) || a.id.localeCompare(b.id));
+    anchor.set(n.id, neighbours[0]?.id ?? '');
+  }
+
+  const partition = new Map();
+  for (const [tier, members] of byTier) {
+    if (members.length <= MAX_TIER_WIDTH) {
+      for (const n of members) partition.set(n.id, tier * SPREAD);
+      continue;
+    }
+    const rows = Math.ceil(members.length / MAX_TIER_WIDTH);
+    const perRow = Math.ceil(members.length / rows);
+    const ordered = [...members].sort(
+      (a, b) => anchor.get(a.id).localeCompare(anchor.get(b.id)) || a.id.localeCompare(b.id),
+    );
+    ordered.forEach((n, i) => {
+      partition.set(n.id, tier * SPREAD + Math.floor(i / perRow));
+    });
+  }
+  return partition;
 }
 
 function sectionPoints(elkEdge) {
