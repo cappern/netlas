@@ -88,3 +88,90 @@ test('every layer renders at scale without losing a node or an edge', async () =
     assert.equal(edges.size, g.edges.length, `${layer} dropped an edge`);
   }
 });
+
+test('isometric cables do not cross a chassis they are unrelated to', async () => {
+  // This is why the isometric view reprojects the flat layout instead of
+  // re-placing nodes on its own grid: ELK routes orthogonally around
+  // obstacles, and a hand-rolled two-segment router does not. The grid
+  // version put 70% of cable segments through a chassis.
+  const COS30 = Math.cos(Math.PI / 6);
+  const SIN30 = 0.5;
+  const SLAB = 26;
+  const K = 0.8;
+  const P = (x, y, z = 0) => ({ x: (x - y) * COS30, y: (x + y) * SIN30 - z });
+
+  const hull = (pts) => {
+    pts = pts.slice().sort((a, b) => a.x - b.x || a.y - b.y);
+    const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+    const lower = [];
+    for (const p of pts) {
+      while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+      lower.push(p);
+    }
+    const upper = [];
+    for (let i = pts.length - 1; i >= 0; i--) {
+      const p = pts[i];
+      while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+      upper.push(p);
+    }
+    lower.pop();
+    upper.pop();
+    return lower.concat(upper);
+  };
+  const segmentsCross = (p, q, r, s) => {
+    const d = (a, b, c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+    const d1 = d(r, s, p), d2 = d(r, s, q), d3 = d(p, q, r), d4 = d(p, q, s);
+    return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+  };
+  const inside = (pt, poly) => {
+    let c = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      if ((poly[i].y > pt.y) !== (poly[j].y > pt.y) &&
+          pt.x < ((poly[j].x - poly[i].x) * (pt.y - poly[i].y)) / (poly[j].y - poly[i].y) + poly[i].x) c = !c;
+    }
+    return c;
+  };
+  const hits = (a, b, poly) => {
+    if (inside(a, poly) || inside(b, poly)) return true;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      if (segmentsCross(a, b, poly[j], poly[i])) return true;
+    }
+    return false;
+  };
+
+  const g = deriveLayer(model, 'l1');
+  const flat = await layoutGraph(g);
+
+  const silhouette = new Map();
+  for (const [id, b0] of flat.nodes) {
+    const b = { x: b0.x * K, y: b0.y * K, w: b0.w * K, h: b0.h * K };
+    const corners = [];
+    for (const X of [b.x, b.x + b.w]) for (const Y of [b.y, b.y + b.h]) for (const Z of [0, SLAB]) {
+      corners.push(P(X, Y, Z));
+    }
+    silhouette.set(id, hull(corners));
+  }
+
+  let segments = 0;
+  let crossings = 0;
+  for (const e of g.edges) {
+    const route = flat.edges.get(e.id);
+    if (!route) continue;
+    const pts = route.points.map((p) => ({ x: p.x * K, y: p.y * K }));
+    for (let i = 1; i < pts.length; i++) {
+      segments++;
+      const a = P(pts[i - 1].x, pts[i - 1].y, SLAB * 0.55);
+      const b = P(pts[i].x, pts[i].y, SLAB * 0.55);
+      for (const [id, poly] of silhouette) {
+        if (id === e.a || id === e.b) continue;
+        if (hits(a, b, poly)) { crossings++; break; }
+      }
+    }
+  }
+
+  const ratio = crossings / segments;
+  assert.ok(
+    ratio < 0.05,
+    `${crossings} of ${segments} cable segments (${Math.round(ratio * 100)}%) cross an unrelated chassis`,
+  );
+});

@@ -1,7 +1,6 @@
 import { VENDOR_MARK } from './icons.mjs';
-import { dashFor, weightFor, DATA_FONT } from '../theme/themes.mjs';
+import { dashFor, weightFor, DATA_FONT, detailFlags } from '../theme/themes.mjs';
 import { defs, background, legendRow, titleBlockEl, esc, r, usedPorts } from './svg.mjs';
-import { orthoRoute } from '../layout/index.mjs';
 
 /**
  * Isometric L1.
@@ -11,12 +10,13 @@ import { orthoRoute } from '../layout/index.mjs';
  * security zone's floor plate, and cables run through the space between
  * them.
  *
- * Placement is its own compact grid rather than a reprojection of the flat
- * layout. Projecting the flat layout directly is the obvious approach and it
- * looks wrong: the diagonal projection stretches a tiered drawing across a
- * bounding box that is mostly empty. The grid keeps the two facts that carry
- * meaning — which tier a device sits in, and its left-to-right order within
- * that tier — and drops only the pixel spacing, which carried none.
+ * It is a projection of the flat layout — the same node positions and the
+ * same cable routes, scaled down. That matters more than it sounds: ELK
+ * routes orthogonally around obstacles, and an earlier version of this file
+ * threw those routes away in favour of its own grid and a naive two-segment
+ * router. The result was 70% of cable segments crossing a chassis they had
+ * nothing to do with. Reprojecting brings that to zero, because the routes
+ * were already obstacle-free in the plane they were computed in.
  *
  * Everything is ordinary SVG, so it prints and exports like any other layer.
  */
@@ -25,68 +25,44 @@ import { orthoRoute } from '../layout/index.mjs';
 const COS30 = Math.cos(Math.PI / 6);
 const SIN30 = 0.5;
 
-const SLAB = 26; // device height in layout units
-const CELL_W = 230; // grid pitch across a tier
-const CELL_D = 132; // grid pitch between tiers
-const FOOT_W = 150; // device footprint
-const FOOT_D = 62;
-const SCALE = 1;
+const SLAB = 26; // device height, in projected units
+
+/**
+ * How far the flat layout is scaled down before projection.
+ *
+ * 0.8 keeps a device footprint at 150x61 — the size the chassis kits are
+ * drawn for — while leaving enough clearance between rows that the slab's
+ * own height cannot make a cable in the next aisle appear to cross it.
+ */
+const K = 0.8;
 
 function project(x, y, z = 0) {
   return {
-    x: (x - y) * COS30 * SCALE,
-    y: ((x + y) * SIN30 - z) * SCALE,
+    x: (x - y) * COS30,
+    y: (x + y) * SIN30 - z,
   };
 }
 
-/**
- * Compact grid placement: one row per tier, ordered within the row by the
- * flat layout's left-to-right order so the two views tell the same story.
- */
-function isometricLayout(graph, placed) {
-  const rows = new Map();
-  for (const n of graph.nodes) {
-    const box = placed.nodes.get(n.id);
-    if (!box) continue;
-    const key = Math.round(box.y);
-    if (!rows.has(key)) rows.set(key, []);
-    rows.get(key).push({ node: n, box });
-  }
-
-  const ordered = [...rows.entries()].sort((a, b) => a[0] - b[0]);
-  const widest = Math.max(...ordered.map(([, r_]) => r_.length), 1);
-
+/** The flat layout, scaled. Routes come along unchanged. */
+function isometricPlacement(graph, flat) {
   const nodes = new Map();
-  ordered.forEach(([, members], row) => {
-    members.sort((a, b) => a.box.x - b.box.x);
-    // Centre each row so the arrangement reads as a floor plan, not a ragged list.
-    const offset = ((widest - members.length) * CELL_W) / 2;
-    members.forEach(({ node }, col) => {
-      const isData = node.kind !== 'device';
-      const w = isData ? FOOT_W * 0.78 : FOOT_W;
-      const d = isData ? FOOT_D * 0.8 : FOOT_D;
-      nodes.set(node.id, {
-        x: offset + col * CELL_W + (FOOT_W - w) / 2,
-        y: row * CELL_D,
-        w,
-        h: d,
-      });
-    });
-  });
-
+  for (const [id, b] of flat.nodes) {
+    nodes.set(id, { x: b.x * K, y: b.y * K, w: b.w * K, h: b.h * K });
+  }
   const edges = new Map();
   for (const e of graph.edges) {
-    const a = nodes.get(e.a);
-    const b = nodes.get(e.b);
-    if (a && b) edges.set(e.id, { points: orthoRoute(a, b) });
+    const route = flat.edges.get(e.id);
+    if (route) {
+      edges.set(e.id, { points: route.points.map((p) => ({ x: p.x * K, y: p.y * K })) });
+    }
   }
-
-  return { nodes, edges, source: placed.source };
+  return { nodes, edges, source: flat.source };
 }
 
 export function renderIsometric(graph, flatPlaced, theme, opts = {}) {
-  const { titleBlock = true, legend = true, padding = 44, interactive = false } = opts;
-  const placed = isometricLayout(graph, flatPlaced);
+  const { titleBlock = true, legend = true, padding = 44, interactive = false, detail = 'full' } = opts;
+  const show = detailFlags(detail);
+  const placed = isometricPlacement(graph, flatPlaced);
 
   // A display list painted back to front. Depth is distance along the
   // viewing axis, so a slab in front correctly hides the cable behind it.
@@ -100,7 +76,7 @@ export function renderIsometric(graph, flatPlaced, theme, opts = {}) {
   }
   for (const n of graph.nodes) {
     const box = placed.nodes.get(n.id);
-    if (box) items.push(slab(n, box, theme, interactive, { zoneBadge: !platesDrawn, graph }));
+    if (box) items.push(slab(n, box, theme, interactive, { zoneBadge: !platesDrawn, graph, show }));
   }
 
   items.sort((a, b) => a.depth - b.depth);
@@ -433,7 +409,7 @@ function frontFace(n, graph, theme, box, height) {
   }
 
   if (parts.length === 0) return '';
-  return `<g transform="${faceTransform('south', x, y, w, h, height)}">${parts.join('')}</g>`;
+  return `<g class="nd-detail-chassis" transform="${faceTransform('south', x, y, w, h, height)}">${parts.join('')}</g>`;
 }
 
 /**
@@ -446,7 +422,7 @@ function topFace(n, theme, box, height) {
   if (kitFor(n.role) === 'none') return '';
   const inset = 6;
   return (
-    `<g transform="${faceTransform('top', x, y, w, h, height)}">` +
+    `<g class="nd-detail-chassis" transform="${faceTransform('top', x, y, w, h, height)}">` +
     `<rect x="${inset}" y="${inset}" width="${r(w - inset * 2)}" height="${r(h - inset * 2)}" ` +
     `rx="2" fill="none" stroke="${theme.textFaint}" stroke-width="0.8" stroke-opacity="0.35"/>` +
     `</g>`
@@ -455,7 +431,7 @@ function topFace(n, theme, box, height) {
 
 /* ---- device slabs ------------------------------------------------------ */
 
-function slab(n, box, theme, interactive, { zoneBadge = false, graph } = {}) {
+function slab(n, box, theme, interactive, { zoneBadge = false, graph, show = detailFlags('full') } = {}) {
   const { x, y, w, h } = box;
   const accent = theme.role[n.role] ?? theme.textMuted;
   const isData = n.kind !== 'device';
@@ -499,23 +475,34 @@ function slab(n, box, theme, interactive, { zoneBadge = false, graph } = {}) {
   // courses, drive bays — rather than by a flat icon pasted onto a solid. A
   // 2D glyph sitting on an isometric object is what makes a drawing look
   // assembled rather than designed.
-  const chassis = isData || !graph ? '' : topFace(n, theme, box, height) + frontFace(n, graph, theme, box, height);
+  const chassis =
+    isData || !graph || !show.chassis
+      ? ''
+      : topFace(n, theme, box, height) + frontFace(n, graph, theme, box, height);
 
   // Text stays screen-aligned. Skewing labels into the isometric plane looks
   // clever for one screenshot and is unreadable in every other situation.
+  //
+  // Each label is painted over a halo of the background colour, because a
+  // cable passing behind a hostname would otherwise cut it in half. The halo
+  // is stroke-first so the glyph shapes stay exact.
+  const halo = (width) =>
+    `paint-order="stroke" stroke="${theme.bg}" stroke-width="${width}" stroke-linejoin="round"`;
+
   const label = isData
     ? `<text x="${r(centre.x)}" y="${r(centre.y + 3)}" text-anchor="middle" font-size="11.5" ` +
-      `font-weight="650" font-family="${esc(DATA_FONT)}" fill="${theme.text}">${esc(n.label)}</text>`
+      `font-weight="650" font-family="${esc(DATA_FONT)}" ${halo(3)} fill="${theme.text}">${esc(n.label)}</text>`
     : `<text x="${r(centre.x)}" y="${r(centre.y - 1)}" text-anchor="middle" font-size="12" ` +
-      `font-weight="650" font-family="${esc(theme.fontDisplay)}" fill="${theme.text}">` +
+      `font-weight="650" font-family="${esc(theme.fontDisplay)}" ${halo(3.5)} fill="${theme.text}">` +
       `${esc(theme.uppercase ? n.label.toUpperCase() : n.label)}</text>` +
-      (sub
-        ? `<text x="${r(centre.x)}" y="${r(centre.y + 11)}" text-anchor="middle" font-size="9" ` +
-          `fill="${theme.textMuted}">${esc(sub)}</text>`
+      (sub && show.sub
+        ? `<text class="nd-detail-sub" x="${r(centre.x)}" y="${r(centre.y + 11)}" text-anchor="middle" ` +
+          `font-size="9" ${halo(2.5)} fill="${theme.textMuted}">${esc(sub)}</text>`
         : '') +
-      (vendor
-        ? `<text x="${r(centre.x)}" y="${r(centre.y - 13)}" text-anchor="middle" font-size="7.5" ` +
-          `font-weight="600" letter-spacing="0.12em" fill="${theme.textFaint}">${esc(vendor)}</text>`
+      (vendor && show.vendor
+        ? `<text class="nd-detail-vendor" x="${r(centre.x)}" y="${r(centre.y - 13)}" text-anchor="middle" ` +
+          `font-size="7.5" font-weight="600" letter-spacing="0.12em" ${halo(2.5)} ` +
+          `fill="${theme.textFaint}">${esc(vendor)}</text>`
         : '');
 
   const xs = [...top, ...south, ...east];

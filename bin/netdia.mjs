@@ -7,20 +7,23 @@ import { deriveLayer, LAYERS } from '../src/model/derive.mjs';
 import { layoutGraph } from '../src/layout/index.mjs';
 import { renderSvg } from '../src/render2d/svg.mjs';
 import { renderIsometric } from '../src/render2d/isometric.mjs';
-import { getTheme, THEMES, THEME_IDS, DEFAULT_THEME } from '../src/theme/themes.mjs';
+import { getTheme, THEMES, THEME_IDS, DEFAULT_THEME, DETAIL_LEVELS } from '../src/theme/themes.mjs';
 import { renderViewer } from '../src/viewer/build.mjs';
 import { freezeLayout } from '../src/layout/freeze.mjs';
 
 const USAGE = `netdia — professional L1/L2/L3 network diagrams from one model
 
   netdia validate <model.yaml> [--json]
-  netdia svg      <model.yaml> --layer l1|l2|l3 [-o file.svg] [--theme <id>]
-  netdia iso      <model.yaml> [-o file.svg] [--theme <id>]
+  netdia svg      <model.yaml> --layer l1|l2|l3 [-o file.svg] [--theme <id>] [--detail <level>]
+  netdia iso      <model.yaml> [-o file.svg] [--theme <id>] [--detail <level>]
   netdia render   <model.yaml> [-o file.html] [--theme <id>] [--no-3d] [--no-iso]
   netdia freeze   <model.yaml> [--layer l1|l2|l3|all] [--reset]
   netdia themes
 
 Themes: ${THEME_IDS.join(', ')} (default: ${DEFAULT_THEME})
+Detail: ${DETAIL_LEVELS.join(', ')} (default: full). Lower levels drop what is
+        illegible when zoomed out — vendor marks, secondary text, port detail —
+        and never the device name, its role, or the cabling.
 `;
 
 const argv = process.argv.slice(2);
@@ -72,6 +75,14 @@ async function main() {
   }
 }
 
+function detailOf() {
+  const level = String(flags.detail ?? 'full').toLowerCase();
+  if (!DETAIL_LEVELS.includes(level)) {
+    throw new Error(`--detail must be one of ${DETAIL_LEVELS.join(', ')}`);
+  }
+  return level;
+}
+
 function requireModel() {
   const path = positional[0];
   if (!path) throw new Error(`Missing <model.yaml>.\n${USAGE}`);
@@ -109,11 +120,14 @@ async function cmdSvg() {
   const theme = getTheme(flags.theme ?? model.meta.theme);
   const graph = deriveLayer(model, layer);
   const placed = await layoutGraph(graph, { frozen: model.layout?.[layer] });
-  const svg = renderSvg(graph, placed, theme);
+  const svg = renderSvg(graph, placed, theme, { detail: detailOf() });
 
   const out = flags.out ?? `out/${stem(path)}.${layer}.svg`;
   write(out, svg);
-  console.log(`wrote ${out}  (${layer.toUpperCase()}, ${graph.nodes.length} nodes, ${graph.edges.length} edges, theme ${theme.id}, layout ${placed.source})`);
+  console.log(
+    `wrote ${out}  (${layer.toUpperCase()}, ${graph.nodes.length} nodes, ${graph.edges.length} edges, ` +
+      `theme ${theme.id}, detail ${detailOf()}, layout ${placed.source})`,
+  );
 }
 
 async function cmdIso() {
@@ -122,11 +136,14 @@ async function cmdIso() {
   const theme = getTheme(flags.theme ?? model.meta.theme);
   const graph = deriveLayer(model, 'l1');
   const placed = await layoutGraph(graph, { frozen: model.layout?.l1 });
-  const svg = renderIsometric(graph, placed, theme);
+  const svg = renderIsometric(graph, placed, theme, { detail: detailOf() });
 
   const out = flags.out ?? `out/${stem(path)}.iso.svg`;
   write(out, svg);
-  console.log(`wrote ${out}  (isometric L1, ${graph.nodes.length} nodes, ${graph.edges.length} edges, theme ${theme.id}, layout ${placed.source})`);
+  console.log(
+    `wrote ${out}  (isometric L1, ${graph.nodes.length} nodes, ${graph.edges.length} edges, ` +
+      `theme ${theme.id}, detail ${detailOf()}, layout ${placed.source})`,
+  );
 }
 
 async function cmdRender() {

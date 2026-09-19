@@ -344,3 +344,60 @@ body {
   .nd-pan { position: static; transform: none !important; }
   .nd-view[hidden] { display: none; }
 }
+
+/* ---- level of detail -------------------------------------------------- */
+
+/* Only ever hides what is already illegible at that zoom. The device name,
+   its role colour, the cable media colour and the topology survive at every
+   level, so nothing a reader could actually have read is taken away.
+   Dropping these also removes the bulk of the rasterisation cost: the glow
+   filters and the small text are what make panning a large diagram stutter. */
+
+.nd-stage[data-detail='mid'] .nd-detail-vendor,
+.nd-stage[data-detail='mid'] .nd-detail-sub,
+.nd-stage[data-detail='low'] .nd-detail-vendor,
+.nd-stage[data-detail='low'] .nd-detail-sub,
+.nd-stage[data-detail='low'] .nd-detail-chassis,
+.nd-stage[data-detail='low'] .nd-detail-chip { display: none; }
+
+/* An SVG filter is re-rasterised on every repaint; at anything below full
+   detail the blur is invisible anyway. */
+.nd-stage[data-detail='mid'] .nd-detail-glow,
+.nd-stage[data-detail='low'] .nd-detail-glow { filter: none !important; }
+
+.nd-detail {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 2px;
+  background: var(--nd-surface);
+  border: 1px solid var(--nd-stroke);
+  border-radius: var(--nd-radius);
+}
+.nd-detail button {
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--nd-text-faint);
+  background: none;
+  border: 0;
+  border-radius: calc(var(--nd-radius) - 2px);
+  cursor: pointer;
+}
+.nd-detail button:hover { color: var(--nd-text); }
+.nd-detail button:focus-visible { outline: 2px solid var(--nd-role-core); outline-offset: -2px; }
+.nd-detail button[aria-pressed='true'] {
+  color: var(--nd-bg);
+  background: var(--nd-text-muted);
+}
+
+/* Promoting the active pane keeps a pan on the compositor instead of
+   repainting every element. Only the visible layer gets it: doing this to all
+   four would multiply the memory a large diagram needs. */
+.nd-view:not([hidden]) .nd-pan { will-change: transform; }
+
+@media print {
+  .nd-detail { display: none; }
+}

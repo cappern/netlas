@@ -340,7 +340,7 @@ test('isometric chassis detail is drawn into the faces, not pasted on top', asyn
 
   // One group per drawn face. Every device except the internet cloud wears a
   // chassis, and each wears exactly two: the lid seam and the front panel.
-  const faces = [...svg.matchAll(/<g transform="matrix\(([^)]+)\)">/g)];
+  const faces = [...svg.matchAll(/<g class="nd-detail-chassis" transform="matrix\(([^)]+)\)">/g)];
   const chassisWearing = g.nodes.filter((n) => n.role !== 'internet' && n.role !== 'wan').length;
   assert.equal(faces.length, chassisWearing * 2, 'each chassis contributes a lid and a front');
 
@@ -353,7 +353,7 @@ test('isometric chassis detail is drawn into the faces, not pasted on top', asyn
 
   // Face content must not use `points=`: it lives in face-local coordinates,
   // and the viewBox test reads `points=` values as global ones.
-  for (const m of svg.matchAll(/<g transform="matrix\([^)]+\)">(.*?)<\/g>/gs)) {
+  for (const m of svg.matchAll(/<g class="nd-detail-chassis" transform="matrix\([^)]+\)">(.*?)<\/g>/gs)) {
     assert.ok(!m[1].includes('points='), 'face kits must use rect/path, never points=');
   }
 });

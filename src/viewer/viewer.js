@@ -14,6 +14,8 @@
 
   var current = P.layers[0].id;
   var view = { scale: 1, x: 0, y: 0 };
+  var detailMode = 'auto';   // auto | full | mid | low
+  var detailEl = document.getElementById('nd-detail');
   var scene3d = null;
   var loading3d = false;
 
@@ -61,6 +63,36 @@
     if (!p) return;
     p.style.transform = 'translate(' + view.x + 'px,' + view.y + 'px) scale(' + view.scale + ')';
     zoomEl.textContent = Math.round(view.scale * 100) + '%';
+    applyDetail();
+  }
+
+  /* ---- level of detail ------------------------------------------------ */
+
+  // Thresholds are set where the smallest text stops being readable rather
+  // than by taste: a 7.5px vendor mark is gone by 0.85, and a 6-unit port
+  // is a smudge below 0.45.
+  function levelForZoom(scale) {
+    if (scale >= 0.85) return 'full';
+    if (scale >= 0.45) return 'mid';
+    return 'low';
+  }
+
+  function applyDetail() {
+    var level = detailMode === 'auto' ? levelForZoom(view.scale) : detailMode;
+    if (stage.dataset.detail !== level) stage.dataset.detail = level;
+  }
+
+  if (detailEl) {
+    detailEl.addEventListener('click', function (e) {
+      var b = e.target.closest('button');
+      if (!b) return;
+      detailMode = b.dataset.level;
+      var all = detailEl.querySelectorAll('button');
+      for (var i = 0; i < all.length; i++) {
+        all[i].setAttribute('aria-pressed', String(all[i].dataset.level === detailMode));
+      }
+      applyDetail();
+    });
   }
 
   function fit() {
@@ -79,6 +111,14 @@
   }
 
   var drag = null;
+  var pending = null;
+  function schedule() {
+    if (pending !== null) return;
+    pending = requestAnimationFrame(function () {
+      pending = null;
+      applyTransform();
+    });
+  }
   stage.addEventListener('pointerdown', function (e) {
     if (current === '3d') return;
     if (e.target.closest('.nd-node')) return;
@@ -92,7 +132,9 @@
     if (!drag) return;
     view.x = e.clientX - drag.x;
     view.y = e.clientY - drag.y;
-    applyTransform();
+    // A pointer can fire far faster than the display refreshes; coalescing
+    // to one transform per frame keeps a drag from queueing repaints.
+    schedule();
   });
   stage.addEventListener('pointerup', function (e) {
     drag = null;
@@ -110,7 +152,7 @@
     view.x = mx - ((mx - view.x) / view.scale) * next;
     view.y = my - ((my - view.y) / view.scale) * next;
     view.scale = next;
-    applyTransform();
+    schedule();
   }, { passive: false });
 
   document.getElementById('nd-fit').addEventListener('click', fit);

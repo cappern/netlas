@@ -464,3 +464,28 @@ export function themeToCss(theme) {
     .map(([k, v]) => `  --${k}: ${v};`)
     .join('\n');
 }
+
+/**
+ * Level of detail.
+ *
+ * The rule for what may be dropped is not taste: an element qualifies only
+ * when it is already illegible at the zoom that triggers the level. A 7.5px
+ * vendor mark is gone by 85% zoom; a 6-unit port is a smudge below 45%. The
+ * device name, its role colour, the cable media colour and the topology are
+ * never dropped, so nothing a reader could have read is taken away.
+ */
+export const DETAIL_LEVELS = ['full', 'mid', 'low'];
+
+export function detailFlags(level = 'full') {
+  if (!DETAIL_LEVELS.includes(level)) {
+    throw new Error(`Unknown detail level "${level}". Use ${DETAIL_LEVELS.join(', ')}.`);
+  }
+  return {
+    level,
+    vendor: level === 'full',
+    sub: level === 'full',
+    glow: level === 'full',
+    chassis: level !== 'low',
+    chip: level !== 'low',
+  };
+}

@@ -1,5 +1,5 @@
 import { icon, VENDOR_MARK } from './icons.mjs';
-import { dashFor, weightFor, DATA_FONT } from '../theme/themes.mjs';
+import { dashFor, weightFor, DATA_FONT, detailFlags } from '../theme/themes.mjs';
 import { groupHulls } from '../layout/index.mjs';
 
 /**
@@ -23,7 +23,9 @@ export function renderSvg(graph, placed, theme, opts = {}) {
     legend = true,
     padding = 40,
     interactive = false,
+    detail = 'full',
   } = opts;
+  const show = detailFlags(detail);
 
   const groups = groupHulls(graph, placed);
   const blockH = titleBlock ? 96 : 0;
@@ -35,7 +37,7 @@ export function renderSvg(graph, placed, theme, opts = {}) {
   const chips = [];
   for (const e of graph.edges) {
     const route = placed.edges.get(e.id);
-    if (route && route.points.length >= 2) collectChips(chips, e, route.points, theme);
+    if (route && route.points.length >= 2) collectChips(chips, e, route.points, theme, show);
   }
   resolveChips(chips);
 
@@ -61,7 +63,7 @@ export function renderSvg(graph, placed, theme, opts = {}) {
 
   for (const e of graph.edges) {
     const route = placed.edges.get(e.id);
-    if (route && route.points.length >= 2) parts.push(edge(e, route.points, theme, interactive));
+    if (route && route.points.length >= 2) parts.push(edge(e, route.points, theme, interactive, show));
   }
 
   for (const c of chips) parts.push(drawChip(c));
@@ -71,7 +73,7 @@ export function renderSvg(graph, placed, theme, opts = {}) {
     if (!box) continue;
     parts.push(
       n.kind === 'device'
-        ? deviceCard(n, box, graph, theme, { zoneBadge: !groups.usable, interactive })
+        ? deviceCard(n, box, graph, theme, { zoneBadge: !groups.usable, interactive, show })
         : dataCard(n, box, theme, interactive),
     );
   }
@@ -144,13 +146,14 @@ function zoneHull(g, theme) {
 
 /* ---- edges ----------------------------------------------------------- */
 
-function edge(e, pts, theme, interactive) {
+function edge(e, pts, theme, interactive, show = detailFlags('full')) {
   const color = theme.media[e.media] ?? theme.stroke;
   const dash = dashFor(e.media, theme);
   const width = weightFor(e.media, theme);
   const d = roundedPath(pts, CORNER);
   const marker = e.directed ? ` marker-end="url(#nd-arrow-${e.media})"` : '';
-  const filter = theme.glow && (e.media === 'fiber' || e.media === 'wan') ? ' filter="url(#nd-glow)"' : '';
+  const glow = show.glow && theme.glow && (e.media === 'fiber' || e.media === 'wan');
+  const filter = glow ? ' filter="url(#nd-glow)"' : '';
   const hit = interactive
     ? `<path d="${d}" fill="none" stroke="transparent" stroke-width="14" class="nd-edge-hit"/>`
     : '';
@@ -165,8 +168,9 @@ function edge(e, pts, theme, interactive) {
     `<g class="nd-edge" data-edge="${esc(e.id)}" data-a="${esc(e.a)}" data-b="${esc(e.b)}" data-media="${esc(e.media)}">` +
     hit +
     lag +
-    `<path d="${d}" fill="none" stroke="${color}" stroke-width="${r(width)}" ` +
-    `stroke-linecap="round" stroke-linejoin="round"${dash ? ` stroke-dasharray="${dash}"` : ''}${marker}${filter}/>` +
+    `<path class="${glow ? 'nd-detail-glow' : ''}" d="${d}" fill="none" stroke="${color}" ` +
+    `stroke-width="${r(width)}" stroke-linecap="round" stroke-linejoin="round"` +
+    `${dash ? ` stroke-dasharray="${dash}"` : ''}${marker}${filter}/>` +
     `</g>`
   );
 }
@@ -181,8 +185,8 @@ function edgeLabels(e, pts, theme) {
 
 /* ---- label placement -------------------------------------------------- */
 
-function collectChips(out, e, pts, theme) {
-  if (e.showPorts !== false) {
+function collectChips(out, e, pts, theme, show = { chip: true }) {
+  if (e.showPorts !== false && show.chip) {
     if (e.aPort) out.push(portChip(e.aPort, pts[0], pts[1], theme, e.media));
     if (e.bPort) out.push(portChip(e.bPort, pts[pts.length - 1], pts[pts.length - 2], theme, e.media));
   }
@@ -276,12 +280,15 @@ function portChip(text, at, toward, theme, media) {
     mono: true,
     // A vertical cable leaves its label free to slide horizontally.
     axis: Math.abs(dy) >= Math.abs(dx) ? 'y' : 'x',
+    // Port names are the first thing to go when zoomed out: at a third of
+    // full size a 9px label is already illegible.
+    detail: true,
   });
   offsetOffCable(spec, dx, dy);
   return spec;
 }
 
-function chipSpec(text, cx, cy, theme, { fill, stroke, text: color, size, mono, axis }) {
+function chipSpec(text, cx, cy, theme, { fill, stroke, text: color, size, mono, axis, detail = false }) {
   const t = String(text);
   return {
     text: t,
@@ -295,12 +302,13 @@ function chipSpec(text, cx, cy, theme, { fill, stroke, text: color, size, mono, 
     size,
     mono,
     axis,
+    detail,
   };
 }
 
 function drawChip(c) {
   return (
-    `<g class="nd-chip" pointer-events="none">` +
+    `<g class="nd-chip${c.detail ? ' nd-detail-chip' : ''}" pointer-events="none">` +
     `<rect x="${r(c.cx - c.w / 2)}" y="${r(c.cy - c.h / 2)}" width="${r(c.w)}" height="${r(c.h)}" rx="${r(c.h / 2)}" ` +
     `fill="${c.fill}" fill-opacity="0.94" stroke="${c.stroke}" stroke-width="0.8"/>` +
     `<text x="${r(c.cx)}" y="${r(c.cy + c.size * 0.36)}" text-anchor="middle" font-size="${c.size}" ` +
@@ -332,13 +340,13 @@ function contentBounds(graph, placed, groups, chips) {
 
 /* ---- nodes ----------------------------------------------------------- */
 
-function deviceCard(n, box, graph, theme, { zoneBadge, interactive }) {
+function deviceCard(n, box, graph, theme, { zoneBadge, interactive, show = detailFlags('full') }) {
   const color = theme.role[n.role] ?? theme.textMuted;
   const { x, y, w, h } = box;
   const up = theme.uppercase;
   const vendor = VENDOR_MARK[n.vendor] ?? '';
 
-  const ports = portStrip(n, graph, box, theme);
+  const ports = show.chassis ? portStrip(n, graph, box, theme) : '';
   const zone = zoneBadge && n.detail.zone ? n.detail.zone : null;
 
   const sub = [n.sublabel, zone ? `· ${zone}` : ''].filter(Boolean).join(' ');
@@ -358,15 +366,16 @@ function deviceCard(n, box, graph, theme, { zoneBadge, interactive }) {
     `<text x="${r(x + 46)}" y="${r(y + 28)}" font-size="13.5" font-weight="650" ` +
     `font-family="${esc(theme.fontDisplay)}" letter-spacing="${up ? '0.06em' : '0.01em'}" ` +
     `fill="${theme.text}">${esc(up ? n.label.toUpperCase() : n.label)}</text>` +
-    (sub
-      ? `<text x="${r(x + 46)}" y="${r(y + 44)}" font-size="10.5" fill="${theme.textMuted}">${esc(sub)}</text>`
+    (sub && show.sub
+      ? `<text class="nd-detail-sub" x="${r(x + 46)}" y="${r(y + 44)}" font-size="10.5" ` +
+        `fill="${theme.textMuted}">${esc(sub)}</text>`
       : '') +
-    (vendor
-      ? `<text x="${r(x + w - 10)}" y="${r(y + 15)}" text-anchor="end" font-size="8" font-weight="600" ` +
-        `letter-spacing="0.12em" fill="${theme.textFaint}">${esc(vendor)}</text>`
+    (vendor && show.vendor
+      ? `<text class="nd-detail-vendor" x="${r(x + w - 10)}" y="${r(y + 15)}" text-anchor="end" font-size="8" ` +
+        `font-weight="600" letter-spacing="0.12em" fill="${theme.textFaint}">${esc(vendor)}</text>`
       : '') +
-    (n.detail.mgmt_ip
-      ? `<text x="${r(x + w - 10)}" y="${r(y + h - 9)}" text-anchor="end" font-size="9" ` +
+    (n.detail.mgmt_ip && show.sub
+      ? `<text class="nd-detail-sub" x="${r(x + w - 10)}" y="${r(y + h - 9)}" text-anchor="end" font-size="9" ` +
         `font-family="${esc(DATA_FONT)}" fill="${theme.textFaint}">${esc(n.detail.mgmt_ip)}</text>`
       : '') +
     ports +
@@ -429,7 +438,7 @@ function portStrip(n, graph, box, theme) {
       : '';
 
   return (
-    `<g class="nd-ports" pointer-events="none">` +
+    `<g class="nd-ports nd-detail-chassis" pointer-events="none">` +
     `<rect x="${r(hx)}" y="${r(hy)}" width="${r(housingW)}" height="${r(housingH)}" rx="2" ` +
     `fill="${theme.bgAlt}" stroke="${theme.strokeSoft}" stroke-width="0.7"/>` +
     segs +

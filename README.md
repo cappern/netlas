@@ -32,8 +32,8 @@ is nowhere else for the fact to live.
 
 ```
 netdia validate <model.yaml> [--json]
-netdia svg      <model.yaml> --layer l1|l2|l3 [-o file.svg] [--theme <id>]
-netdia iso      <model.yaml> [-o file.svg] [--theme <id>]
+netdia svg      <model.yaml> --layer l1|l2|l3 [-o file.svg] [--theme <id>] [--detail <level>]
+netdia iso      <model.yaml> [-o file.svg] [--theme <id>] [--detail <level>]
 netdia render   <model.yaml> [-o file.html] [--theme <id>] [--no-3d] [--no-iso]
 netdia freeze   <model.yaml> [--layer l1|l2|l3|all] [--reset]
 netdia themes
@@ -158,6 +158,13 @@ bounding box that is mostly empty. The grid keeps the two facts that carry
 meaning — which tier a device sits in, and its left-to-right order within that
 tier — and drops only the pixel spacing, which carried none.
 
+It is a projection of the flat layout — the same node positions and the same
+cable routes, scaled to 0.8. That matters more than it sounds. An earlier
+version re-placed nodes on its own grid and routed cables with a naive
+two-segment router, and 70% of cable segments ended up crossing a chassis they
+had nothing to do with. ELK already routes orthogonally around obstacles, so
+reprojecting brings that to zero.
+
 Devices wear a real chassis rather than a flat icon. Detail is drawn *into*
 the isometric faces through a transform in face-local units, so a switch shows
 a port row coloured by each cable's actual media, a firewall shows brick
@@ -176,14 +183,45 @@ that happens the plates are dropped and each slab carries its zone as text.
 Labels stay screen-aligned. Skewing text into the isometric plane looks clever
 in one screenshot and is unreadable everywhere else.
 
+## Level of detail
+
+Large diagrams carry detail that is only meaningful up close. netdia can drop
+it, in the viewer through the **Auto / Full / Mid / Low** control, and in a
+static export through `--detail`.
+
+| Level | Dropped |
+|---|---|
+| `full` | nothing |
+| `mid` | vendor marks, secondary text, the glow filter |
+| `low` | + chassis detail, port strips, port-name chips |
+
+The rule for what may be dropped is not taste: an element qualifies only when
+it is already illegible at the zoom that triggers the level. A 7.5px vendor
+mark has gone by 85% zoom; a port is a smudge below 45%. The device name, its
+role colour, the cable media colour and the topology are never dropped, so
+nothing a reader could actually have read is taken away — there is a test for
+exactly that.
+
+It is also the cheapest performance lever in the project. On the 59-device
+example, dropping to `low` takes the visible layer from 1633 painted elements
+to 833 and from 350 text elements to 66, and `mid` alone switches off 61
+Gaussian-blur filters — an SVG filter is re-rasterised on every repaint. In
+the viewer `Auto` follows the zoom, and picking a level pins it.
+
+Static exports shrink accordingly: the enterprise L1 goes 177 KB → 79 KB.
+
 ## Viewer
 
 `netdia render` produces one HTML file with no external requests — no CDN, no
 web fonts, no network at all. It opens from a USB stick in a plant room.
 
-Tabs for L1, L2, L3, ISO and 3D; pan and zoom; click-to-inspect (interfaces,
-IPs, VLANs, services); search across hostnames, IPs, VLAN ids and port names;
-SVG and PNG export; and print-to-PDF. The ISO tab shares L1's inspector data,
+Tabs for L1, L2, L3, ISO and 3D; pan and zoom; a level-of-detail control;
+click-to-inspect (interfaces, IPs, VLANs, services); search across hostnames,
+IPs, VLAN ids and port names; SVG and PNG export; and print-to-PDF.
+
+Panning coalesces to one transform per animation frame, and only the visible
+layer is promoted to its own compositing layer — doing that to all four would
+multiply the memory a large diagram needs. The ISO tab shares L1's inspector data,
 so clicking a slab shows the same device detail as clicking its flat card.
 
 The 3D tab stacks L1, L2 and L3 as three floors. A device keeps its position
@@ -208,13 +246,14 @@ is carried by a short text mark, which is accurate and unrestricted.
 npm test
 ```
 
-43 tests covering validation rules, layer derivation, tier ordering, zone-hull
+52 tests covering validation rules, layer derivation, tier ordering, zone-hull
 and zone-plate fallbacks, minimum zone gutters on each axis, SVG
 well-formedness in every theme, XML escaping, viewBox containment for both
 renderers, isometric depth ordering, face-matrix orientation, faceplate/port
 agreement between the two views, freeze round-trips, and a scale suite that
-holds the 59-device example to a readable aspect ratio with no dropped nodes
-or edges.
+holds the 59-device example to a readable aspect ratio, keeps isometric cable
+crossings under 5%, and proves that lowering detail never removes a device, a
+cable or a name.
 
 ## Layout of the repository
 

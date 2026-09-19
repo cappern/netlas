@@ -145,6 +145,12 @@ ${CSS}
   <div class="nd-legend" id="nd-legend"></div>
   <div class="nd-foot__right">
     ${warnNote}
+    <div class="nd-detail" id="nd-detail" role="group" aria-label="Level of detail">
+      <button type="button" data-level="auto" aria-pressed="true" title="Follow the zoom level">Auto</button>
+      <button type="button" data-level="full" aria-pressed="false" title="Everything">Full</button>
+      <button type="button" data-level="mid" aria-pressed="false" title="Drop vendor marks and secondary text">Mid</button>
+      <button type="button" data-level="low" aria-pressed="false" title="Names, roles and cabling only">Low</button>
+    </div>
     <button id="nd-fit" class="nd-btn" type="button">Fit</button>
     <span class="nd-zoom" id="nd-zoom">100%</span>
   </div>
