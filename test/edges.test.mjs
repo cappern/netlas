@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { loadModel, parseModel } from '../src/model/load.mjs';
 import { deriveLayer, LAYERS } from '../src/model/derive.mjs';
 import { layoutGraph } from '../src/layout/index.mjs';
@@ -201,3 +202,30 @@ test('isometric cables get a fat transparent hit target only when interactive', 
 function count(s, re) {
   return (s.match(re) ?? []).length;
 }
+
+test('the pointer is not captured before a gesture is known to be a drag', () => {
+  // This is a source-level guard because the behaviour it protects cannot be
+  // reached from node:test at all, and it cost a shipped bug to learn.
+  //
+  // setPointerCapture retargets the click that follows to the capturing
+  // element. Capturing in pointerdown therefore makes every tap on a cable
+  // arrive with the stage as its target, and `e.target.closest('.nd-edge')`
+  // returns null -- clicking a link silently does nothing. Node clicks were
+  // unaffected only because pointerdown returns early for them, which is what
+  // made the bug look like it worked.
+  //
+  // Synthetic click dispatch in a headless browser does not reproduce it
+  // either: dispatching on the element sets the target directly and bypasses
+  // the retargeting. Only a real mouse press does.
+  const src = readFileSync(new URL('../src/viewer/viewer.js', import.meta.url), 'utf8');
+  const down = src.slice(src.indexOf("addEventListener('pointerdown'"));
+  const body = down.slice(0, down.indexOf('\n  });'));
+  assert.ok(
+    !body.includes('setPointerCapture'),
+    'pointerdown must not capture the pointer; capture belongs in pointermove once the drag threshold is crossed',
+  );
+  assert.ok(
+    src.includes('setPointerCapture'),
+    'a committed drag must still capture, so the gesture survives leaving the stage',
+  );
+});

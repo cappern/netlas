@@ -128,8 +128,12 @@
     // A cable is a legitimate pan handle as well as a click target, so the
     // gesture is only committed to panning once the pointer has travelled
     // further than a hand tremor.
+    //
+    // The pointer is deliberately NOT captured here. Capturing retargets the
+    // click that follows to the capturing element, so a tap on a cable would
+    // arrive with the stage as its target and no way to tell which cable was
+    // hit. Capture is taken in pointermove, once this is known to be a drag.
     drag = { x: e.clientX - view.x, y: e.clientY - view.y, x0: e.clientX, y0: e.clientY, moved: false };
-    stage.setPointerCapture(e.pointerId);
   });
   stage.addEventListener('pointermove', function (e) {
     if (!drag) return;
@@ -138,6 +142,14 @@
       drag.moved = true;
       var pd = pane();
       if (pd) pd.dataset.grabbing = 'true';
+      // Now that it is a drag, capture so the gesture survives the pointer
+      // leaving the stage.
+      try {
+        stage.setPointerCapture(e.pointerId);
+        drag.captured = true;
+      } catch (err) {
+        drag.captured = false;
+      }
     }
     view.x = e.clientX - drag.x;
     view.y = e.clientY - drag.y;
@@ -147,10 +159,11 @@
   });
   stage.addEventListener('pointerup', function (e) {
     panned = !!(drag && drag.moved);
+    var captured = !!(drag && drag.captured);
     drag = null;
     var p = pane();
     if (p) p.dataset.grabbing = 'false';
-    stage.releasePointerCapture(e.pointerId);
+    if (captured) stage.releasePointerCapture(e.pointerId);
   });
   stage.addEventListener('wheel', function (e) {
     if (current === '3d') return;
