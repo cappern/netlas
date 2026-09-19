@@ -45,6 +45,11 @@ export function renderViewer({ model, layers, theme, enable3d = true, warnings =
     }),
     edges: graph.edges.map((e) => ({
       id: e.id, a: e.a, b: e.b,
+      kind: e.kind,
+      aPort: e.aPort, bPort: e.bPort,
+      media: e.media, speed: e.speed,
+      label: e.label, directed: e.directed,
+      detail: e.detail,
       color: theme.media[e.media] ?? theme.stroke,
       points: (placed.edges.get(e.id)?.points ?? []).map((p) => ({ x: p.x, y: p.y })),
     })),

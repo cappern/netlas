@@ -100,9 +100,20 @@ function deviceNode(d) {
 /* ---- L1: physical cabling -------------------------------------------- */
 
 function deriveL1(model) {
+  const ix = indexModel(model);
   const nodes = model.devices.map(deviceNode);
   const byLag = new Map();
   const edges = [];
+
+  // The two ends of a cable only agree on a VLAN if both interfaces carry it;
+  // the union would claim the cable transports VLANs one end cannot see.
+  const sharedVlans = (a, b) => {
+    const ia = a.iface ? ix.ifaceOf(a.device, a.iface) : null;
+    const ib = b.iface ? ix.ifaceOf(b.device, b.iface) : null;
+    if (!ia || !ib) return [];
+    const right = new Set(ifaceVlans(ib));
+    return ifaceVlans(ia).filter((v) => right.has(v)).sort((x, y) => x - y);
+  };
 
   model.links.forEach((l, n) => {
     const a = parseEndpoint(l.a);
@@ -110,7 +121,13 @@ function deriveL1(model) {
     const key = l.lag ? `lag:${[a.device, b.device].sort().join('~')}:${l.lag}` : null;
     if (key && byLag.has(key)) {
       const e = byLag.get(key);
-      e.members += 1;
+      e.detail.memberLinks.push({
+        aPort: a.iface,
+        bPort: b.iface,
+        speed: l.speed,
+        media: l.media ?? 'copper',
+      });
+      e.members = e.detail.memberLinks.length;
       e.label = `${l.lag} (${e.members} x ${l.speed ?? '?'})`;
       return;
     }
@@ -129,6 +146,17 @@ function deriveL1(model) {
       style: l.lag ? 'lag' : 'single',
       members: 1,
       directed: false,
+      kind: 'cable',
+      // Only facts the edge does not already carry. Media, speed and the two
+      // port names live on the edge itself; repeating them here would give the
+      // viewer two places to read the same thing from.
+      detail: {
+        lag: l.lag ?? null,
+        memberLinks: l.lag
+          ? [{ aPort: a.iface, bPort: b.iface, speed: l.speed, media: l.media ?? 'copper' }]
+          : null,
+        vlans: sharedVlans(a, b),
+      },
     };
     if (key) {
       edge.label = `${l.lag} (1 x ${l.speed ?? '?'})`;
@@ -218,6 +246,18 @@ function deriveL2(model) {
         media: entry.tagged ? 'tagged' : 'untagged',
         style: entry.svi ? 'gateway' : 'member',
         directed: false,
+        kind: 'vlan-member',
+        detail: {
+          vlan: vid,
+          vlanName: v?.name,
+          subnet: v?.subnet,
+          gateway: v?.gateway,
+          tagged: entry.tagged,
+          svi: entry.svi,
+          // The drawn label collapses to "N ports"; the inspector has room
+          // for the real list and is the only place it survives.
+          ports: entry.ports.slice(),
+        },
       });
     }
   }
@@ -305,6 +345,13 @@ function deriveL3(model) {
         style: isGateway ? 'gateway' : 'attached',
         vrf: i.vrf,
         directed: false,
+        kind: 'attachment',
+        detail: {
+          cidr: net.detail.cidr,
+          gateway: !!isGateway,
+          vrf: i.vrf ?? net.detail.vrf,
+          networkName: net.detail.name,
+        },
       });
     }
   }
@@ -322,6 +369,12 @@ function deriveL3(model) {
       media: 'routing',
       style: `route-${r.kind ?? 'static'}`,
       directed: !r.bidirectional,
+      kind: 'adjacency',
+      detail: {
+        routingKind: r.kind ?? 'static',
+        detail: r.detail,
+        bidirectional: !!r.bidirectional,
+      },
     });
   }
 

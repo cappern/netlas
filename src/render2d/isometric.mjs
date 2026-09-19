@@ -72,7 +72,7 @@ export function renderIsometric(graph, flatPlaced, theme, opts = {}) {
   const platesDrawn = items.length > 0;
   for (const e of graph.edges) {
     const route = placed.edges.get(e.id);
-    if (route && route.points.length >= 2) items.push(...cableSegments(e, route.points, theme));
+    if (route && route.points.length >= 2) items.push(...cableSegments(e, route.points, theme, interactive));
   }
   for (const n of graph.nodes) {
     const box = placed.nodes.get(n.id);
@@ -196,7 +196,7 @@ function drawZonePlate(z, theme) {
 
 /* ---- cables ----------------------------------------------------------- */
 
-function cableSegments(e, pts, theme) {
+function cableSegments(e, pts, theme, interactive) {
   const color = theme.media[e.media] ?? theme.stroke;
   const dash = dashFor(e.media, theme);
   const width = weightFor(e.media, theme);
@@ -208,6 +208,15 @@ function cableSegments(e, pts, theme) {
     const b = pts[i];
     const pa = project(a.x, a.y, z);
     const pb = project(b.x, b.y, z);
+    const d = `M${r(pa.x)} ${r(pa.y)} L${r(pb.x)} ${r(pb.y)}`;
+    // A projected cable is a 1-2px diagonal, far below a comfortable click
+    // target, so every segment gets a fat invisible companion. Only the first
+    // segment is focusable: a nine-segment route would otherwise cost nine
+    // tab stops to walk past.
+    const hit = interactive
+      ? `<path d="${d}" fill="none" stroke="transparent" stroke-width="12" class="nd-edge-hit"/>`
+      : '';
+    const focus = interactive && i === 1 ? ' tabindex="0" role="button"' : '';
     out.push({
       // Depth is the nearest extent along the viewing axis, the same
       // convention slabs use. A centroid here would sort a long cable against
@@ -216,8 +225,9 @@ function cableSegments(e, pts, theme) {
       bbox: [Math.min(pa.x, pb.x), Math.min(pa.y, pb.y), Math.max(pa.x, pb.x), Math.max(pa.y, pb.y)],
       svg:
         `<g class="nd-edge" data-edge="${esc(e.id)}" data-a="${esc(e.a)}" data-b="${esc(e.b)}" ` +
-        `data-media="${esc(e.media)}">` +
-        `<path d="M${r(pa.x)} ${r(pa.y)} L${r(pb.x)} ${r(pb.y)}" fill="none" stroke="${color}" ` +
+        `data-media="${esc(e.media)}"${focus}>` +
+        hit +
+        `<path d="${d}" fill="none" stroke="${color}" ` +
         `stroke-width="${r(width)}" stroke-linecap="round"${dash ? ` stroke-dasharray="${dash}"` : ''}/>` +
         `</g>`,
       projected: true,

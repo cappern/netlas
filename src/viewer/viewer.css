@@ -205,6 +205,14 @@ body {
 .nd-stage[data-focus='on'] .nd-edge[data-match='1'] { opacity: 1; }
 .nd-node { cursor: pointer; }
 .nd-node:focus-visible { outline: 2px solid var(--nd-role-core); outline-offset: 2px; }
+.nd-edge-hit { cursor: pointer; }
+.nd-edge:focus-visible { outline: 2px solid var(--nd-role-core); outline-offset: 2px; }
+/* The selected cable is already the only one at full opacity; thickening it
+   further would redraw the topology, so the emphasis stays at a half-pixel. */
+.nd-edge[data-selected='1'] path:not(.nd-edge-hit) {
+  stroke-opacity: 1;
+  stroke-width: 2.6;
+}
 
 /* ---- inspector ------------------------------------------------------- */
 
@@ -283,6 +291,8 @@ body {
   border: 1px solid var(--nd-stroke-soft);
   border-radius: 999px;
 }
+button.nd-pill { font-family: var(--nd-font-data); font-size: 10px; cursor: pointer; }
+button.nd-pill:hover { color: var(--nd-text); border-color: var(--nd-stroke-strong); }
 
 /* ---- footer ---------------------------------------------------------- */
 

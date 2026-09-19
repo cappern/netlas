@@ -111,6 +111,7 @@
   }
 
   var drag = null;
+  var panned = false;
   var pending = null;
   function schedule() {
     if (pending !== null) return;
@@ -124,12 +125,20 @@
     if (e.target.closest('.nd-node')) return;
     var p = pane();
     if (!p) return;
-    drag = { x: e.clientX - view.x, y: e.clientY - view.y };
-    p.dataset.grabbing = 'true';
+    // A cable is a legitimate pan handle as well as a click target, so the
+    // gesture is only committed to panning once the pointer has travelled
+    // further than a hand tremor.
+    drag = { x: e.clientX - view.x, y: e.clientY - view.y, x0: e.clientX, y0: e.clientY, moved: false };
     stage.setPointerCapture(e.pointerId);
   });
   stage.addEventListener('pointermove', function (e) {
     if (!drag) return;
+    if (!drag.moved) {
+      if (Math.abs(e.clientX - drag.x0) + Math.abs(e.clientY - drag.y0) <= 4) return;
+      drag.moved = true;
+      var pd = pane();
+      if (pd) pd.dataset.grabbing = 'true';
+    }
     view.x = e.clientX - drag.x;
     view.y = e.clientY - drag.y;
     // A pointer can fire far faster than the display refreshes; coalescing
@@ -137,6 +146,7 @@
     schedule();
   });
   stage.addEventListener('pointerup', function (e) {
+    panned = !!(drag && drag.moved);
     drag = null;
     var p = pane();
     if (p) p.dataset.grabbing = 'false';
@@ -163,14 +173,25 @@
   /* ---- selection and inspector --------------------------------------- */
 
   stage.addEventListener('click', function (e) {
+    // A pan that happens to end over a cable is not a click on that cable.
+    if (panned) { panned = false; return; }
     var node = e.target.closest('.nd-node');
-    if (node) select(node.dataset.node);
+    if (node) { select(node.dataset.node); return; }
+    var edge = e.target.closest('.nd-edge');
+    if (edge) selectEdge(edge.dataset.edge);
   });
   stage.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
     var node = e.target.closest('.nd-node');
-    if (node && (e.key === 'Enter' || e.key === ' ')) {
+    if (node) {
       e.preventDefault();
       select(node.dataset.node);
+      return;
+    }
+    var edge = e.target.closest('.nd-edge');
+    if (edge) {
+      e.preventDefault();
+      selectEdge(edge.dataset.edge);
     }
   });
   stage.addEventListener('netdia:select', function (e) {
@@ -188,15 +209,51 @@
     return null;
   }
 
+  function findEdge(id, layerId) {
+    var layers = layerId ? [layerById(layerId)] : P.layers;
+    for (var i = 0; i < layers.length; i++) {
+      var l = layers[i];
+      if (!l || !l.edges) continue;
+      for (var j = 0; j < l.edges.length; j++) if (l.edges[j].id === id) return { edge: l.edges[j], layer: l };
+    }
+    return null;
+  }
+
+  function labelOf(layer, id) {
+    var nodes = (layer && layer.nodes) || [];
+    for (var i = 0; i < nodes.length; i++) if (nodes[i].id === id) return nodes[i].label;
+    return id;
+  }
+
   function select(id, layerId) {
     var node = findNode(id, layerId);
     if (!node) return;
     inspector.innerHTML = inspectorHtml(node);
-    body.dataset.inspector = 'open';
-    inspector.querySelector('.nd-insp__close').addEventListener('click', closeInspector);
+    openInspector();
     highlight(id);
     if (scene3d) scene3d.highlight(id);
   }
+
+  function selectEdge(id) {
+    var found = findEdge(id, current) || findEdge(id);
+    if (!found) return;
+    inspector.innerHTML = edgeInspectorHtml(found.edge, found.layer);
+    openInspector();
+    highlightEdge(found.edge);
+    // scene3d.highlight() resolves a node id against the 3D plates; an edge
+    // id would silently clear the whole stack instead.
+    if (scene3d) scene3d.highlight(null);
+  }
+
+  function openInspector() {
+    body.dataset.inspector = 'open';
+    inspector.querySelector('.nd-insp__close').addEventListener('click', closeInspector);
+  }
+
+  inspector.addEventListener('click', function (e) {
+    var goto = e.target.closest('[data-goto]');
+    if (goto) select(goto.dataset.goto);
+  });
 
   function closeInspector() {
     body.dataset.inspector = 'closed';
@@ -208,12 +265,18 @@
     if (e.key === 'Escape') { closeInspector(); search.value = ''; applySearch(''); }
   });
 
+  function clearSelected(svg) {
+    var sel = svg.querySelectorAll('.nd-edge[data-selected="1"]');
+    for (var i = 0; i < sel.length; i++) sel[i].removeAttribute('data-selected');
+  }
+
   function highlight(id) {
     var views = stage.querySelectorAll('.nd-view');
     for (var i = 0; i < views.length; i++) {
       var svg = views[i].querySelector('svg');
       if (!svg) continue;
-      if (!id) { views[i].parentNode && (views[i].querySelector('.nd-pan').parentNode.dataset.focus = 'off'); continue; }
+      clearSelected(svg);
+      if (!id) continue;
       var keep = { };
       keep[id] = true;
       var edges = svg.querySelectorAll('.nd-edge');
@@ -228,6 +291,29 @@
       }
     }
     stage.dataset.focus = id ? 'on' : 'off';
+  }
+
+  function highlightEdge(edge) {
+    var views = stage.querySelectorAll('.nd-view');
+    for (var i = 0; i < views.length; i++) {
+      var svg = views[i].querySelector('svg');
+      if (!svg) continue;
+      clearSelected(svg);
+      var edges = svg.querySelectorAll('.nd-edge');
+      for (var j = 0; j < edges.length; j++) {
+        edges[j].dataset.match = edges[j].dataset.edge === edge.id ? '1' : '0';
+      }
+      // The isometric renderer splits one cable into a group per segment, all
+      // sharing the same data-edge, so selection is never a single element.
+      var picked = svg.querySelectorAll('[data-edge="' + edge.id + '"]');
+      for (var m = 0; m < picked.length; m++) picked[m].dataset.selected = '1';
+      var nodes = svg.querySelectorAll('.nd-node');
+      for (var k = 0; k < nodes.length; k++) {
+        var n = nodes[k].dataset.node;
+        nodes[k].dataset.match = n === edge.a || n === edge.b ? '1' : '0';
+      }
+    }
+    stage.dataset.focus = 'on';
   }
 
   /* ---- search --------------------------------------------------------- */
@@ -277,6 +363,101 @@
     var rows = pairs.filter(function (p) { return p[1]; })
       .map(function (p) { return '<dt>' + esc(p[0]) + '</dt><dd>' + esc(p[1]) + '</dd>'; });
     return rows.length ? '<dl class="nd-kv">' + rows.join('') + '</dl>' : '';
+  }
+
+  function inspectorHead(kindLabel, title, micro) {
+    return '<div class="nd-insp__head">' +
+      '<button class="nd-insp__close" aria-label="Close details">&times;</button>' +
+      '<div class="micro">' + esc(kindLabel) + '</div>' +
+      '<h2>' + title + '</h2>' +
+      (micro ? '<p>' + esc(micro) + '</p>' : '') +
+      '</div>';
+  }
+
+  function goTo(id, label) {
+    return '<button type="button" class="nd-pill" data-goto="' + esc(id) + '">' + esc(label) + '</button>';
+  }
+
+  function edgeInspectorHtml(edge, layer) {
+    var d = edge.detail || {};
+    var out = '';
+
+    switch (edge.kind) {
+      case 'cable': {
+        var micro = [edge.media, edge.speed].filter(Boolean).join(' · ');
+        out += inspectorHead('CABLE', 'Physical link', micro);
+        out += '<div class="nd-sect"><h3>Run</h3>' +
+          goTo(edge.a, labelOf(layer, edge.a)) +
+          '<span class="nd-pill">' + esc(edge.aPort || '—') + '</span>' +
+          '<span class="nd-pill">&harr;</span>' +
+          goTo(edge.b, labelOf(layer, edge.b)) +
+          '<span class="nd-pill">' + esc(edge.bPort || '—') + '</span>' +
+          '</div>';
+        if (d.lag) {
+          out += '<div class="nd-sect"><h3>LAG &middot; ' + esc(d.lag) + '</h3>' +
+            (d.memberLinks || []).map(function (m) {
+              return '<div class="nd-iface"><b>' + esc(m.aPort) + ' &harr; ' + esc(m.bPort) + '</b>' +
+                '<span>' + esc(m.speed || '') + '</span></div>';
+            }).join('') + '</div>';
+        }
+        if (d.vlans && d.vlans.length) {
+          out += '<div class="nd-sect"><h3>Carries VLANs</h3>' + d.vlans.map(function (v) {
+            return '<span class="nd-pill">' + esc(v) + '</span>';
+          }).join('') + '</div>';
+        }
+        break;
+      }
+      case 'vlan-member': {
+        out += inspectorHead('VLAN MEMBERSHIP', 'VLAN ' + esc(d.vlan),
+          d.tagged ? 'Tagged (trunk)' : 'Untagged (access)');
+        var verb = d.svi ? 'is the gateway for' : 'is a member of';
+        out += '<div class="nd-sect"><h3>Relationship</h3><p style="margin:0;font-size:11.5px;color:var(--nd-text-muted)">' +
+          goTo(edge.a, labelOf(layer, edge.a)) + ' <b>' + verb + '</b> ' +
+          goTo(edge.b, 'VLAN ' + d.vlan) +
+          (d.vlanName ? ' <span class="nd-pill">' + esc(d.vlanName) + '</span>' : '') +
+          '</p></div>';
+        if (d.ports && d.ports.length) {
+          out += '<div class="nd-sect"><h3>Via ports &middot; ' + d.ports.length + '</h3>' +
+            d.ports.map(function (p) {
+              return '<span class="nd-pill">' + esc(p) + '</span>';
+            }).join('') + '</div>';
+        }
+        var vfacts = kv([['Subnet', d.subnet], ['Gateway', d.gateway]]);
+        if (vfacts) out += '<div class="nd-sect"><h3>Addressing</h3>' + vfacts + '</div>';
+        break;
+      }
+      case 'attachment': {
+        out += inspectorHead('INTERFACE ATTACHMENT', esc(edge.label || ''), d.networkName || '');
+        out += '<div class="nd-sect"><h3>Relationship</h3><p style="margin:0;font-size:11.5px;color:var(--nd-text-muted)">' +
+          goTo(edge.a, labelOf(layer, edge.a)) +
+          '<span class="nd-pill">' + esc(edge.aPort || '') + '</span>' +
+          '<span class="nd-pill">' + esc(edge.label || '') + '</span>' +
+          ' <b>attaches to</b> ' + goTo(edge.b, d.cidr || labelOf(layer, edge.b)) +
+          '</p></div>';
+        var afacts = kv([
+          ['VRF', d.vrf],
+          ['Role', d.gateway ? 'Default gateway for ' + (d.cidr || '') : ''],
+        ]);
+        if (afacts) out += '<div class="nd-sect"><h3>Facts</h3>' + afacts + '</div>';
+        break;
+      }
+      default: {
+        var rk = String(d.routingKind || 'static').toUpperCase();
+        out += inspectorHead('ROUTING ADJACENCY', 'Route',
+          rk + (d.bidirectional ? ' (bidirectional)' : ''));
+        out += '<div class="nd-sect"><h3>Relationship</h3><p style="margin:0;font-size:11.5px;color:var(--nd-text-muted)">' +
+          goTo(edge.a, labelOf(layer, edge.a)) +
+          ' <b>' + (d.bidirectional ? 'peers with' : 'routes via') + '</b> ' +
+          goTo(edge.b, labelOf(layer, edge.b)) +
+          '</p></div>';
+        if (d.detail) {
+          out += '<div class="nd-sect"><h3>Description</h3>' +
+            '<p style="margin:0;font-size:11.5px;color:var(--nd-text-muted)">' + esc(d.detail) + '</p></div>';
+        }
+      }
+    }
+
+    return out;
   }
 
   function inspectorHtml(node) {

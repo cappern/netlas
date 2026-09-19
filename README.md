@@ -216,8 +216,24 @@ Static exports shrink accordingly: the enterprise L1 goes 177 KB → 79 KB.
 web fonts, no network at all. It opens from a USB stick in a plant room.
 
 Tabs for L1, L2, L3, ISO and 3D; pan and zoom; a level-of-detail control;
-click-to-inspect (interfaces, IPs, VLANs, services); search across hostnames,
-IPs, VLAN ids and port names; SVG and PNG export; and print-to-PDF.
+click-to-inspect on both devices and links; search across hostnames, IPs,
+VLAN ids and port names; SVG and PNG export; and print-to-PDF.
+
+Links are clickable, and the inspector says something true for the layer you
+are on rather than calling everything a cable:
+
+| Layer | What a link means | Wording |
+|---|---|---|
+| L1 | a physical cable | "SW-CORE-1 `Eth1/11` <-> SW-DIST-1 `Te1/0/1`", media, speed, LAG members, and the VLANs the trunk carries |
+| L2 | VLAN membership | "SW-DIST-1 **is a member of** VLAN 10", or **is the gateway for** when the device has the SVI |
+| L3 | an attachment or an adjacency | "SW-CORE-1 `Vlan10` `10.20.10.1/24` **attaches to** `10.20.10.0/24`", or "RTR-WAN-1 **routes via** Internet" |
+
+The VLANs carried on a cable are derived, not authored: they are the
+intersection of the two endpoint interfaces' VLAN sets. Endpoint names in the
+link inspector are clickable, so you can walk a path hop by hop.
+
+Dragging that starts on a cable still pans; only a click that does not move
+selects the link.
 
 Panning coalesces to one transform per animation frame, and only the visible
 layer is promoted to its own compositing layer — doing that to all four would
@@ -246,14 +262,15 @@ is carried by a short text mark, which is accurate and unrestricted.
 npm test
 ```
 
-52 tests covering validation rules, layer derivation, tier ordering, zone-hull
+64 tests covering validation rules, layer derivation, tier ordering, zone-hull
 and zone-plate fallbacks, minimum zone gutters on each axis, SVG
 well-formedness in every theme, XML escaping, viewBox containment for both
 renderers, isometric depth ordering, face-matrix orientation, faceplate/port
 agreement between the two views, freeze round-trips, and a scale suite that
 holds the 59-device example to a readable aspect ratio, keeps isometric cable
-crossings under 5%, and proves that lowering detail never removes a device, a
-cable or a name.
+crossings under 5%, proves that lowering detail never removes a device, a
+cable or a name, and asserts that edge detail never repeats a fact the edge
+already carries.
 
 ## Layout of the repository
 

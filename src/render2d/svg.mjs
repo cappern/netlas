@@ -165,7 +165,9 @@ function edge(e, pts, theme, interactive, show = detailFlags('full')) {
       : '';
 
   return (
-    `<g class="nd-edge" data-edge="${esc(e.id)}" data-a="${esc(e.a)}" data-b="${esc(e.b)}" data-media="${esc(e.media)}">` +
+    `<g class="nd-edge" data-edge="${esc(e.id)}" data-a="${esc(e.a)}" data-b="${esc(e.b)}" data-media="${esc(e.media)}"${
+      interactive ? ' tabindex="0" role="button"' : ''
+    }>` +
     hit +
     lag +
     `<path class="${glow ? 'nd-detail-glow' : ''}" d="${d}" fill="none" stroke="${color}" ` +
