@@ -24,6 +24,7 @@ are three views of one model:
 | L2 | interface VLAN membership | Broadcast domains, trunks, SVIs |
 | L3 | interface IPs + `routing` | Networks, gateways, VRFs, adjacencies |
 | ISO | same graph as L1 | The same cabling as an isometric floor plan |
+| DEP | `dependencies` | What each system needs to keep working |
 
 Change a trunk's VLAN list and all three layers update together, because there
 is nowhere else for the fact to live.
@@ -32,11 +33,14 @@ is nowhere else for the fact to live.
 
 ```
 netdia validate <model.yaml> [--json]
-netdia svg      <model.yaml> --layer l1|l2|l3 [-o file.svg] [--theme <id>] [--detail <level>]
+netdia svg      <model.yaml> --layer l1|l2|l3|dep [-o file.svg] [--theme <id>] [--detail <level>]
 netdia iso      <model.yaml> [-o file.svg] [--theme <id>] [--detail <level>]
 netdia render   <model.yaml> [-o file.html] [--theme <id>] [--no-3d] [--no-iso]
-netdia freeze   <model.yaml> [--layer l1|l2|l3|all] [--reset]
+netdia freeze   <model.yaml> [--layer l1|l2|l3|dep|all] [--reset]
 netdia themes
+
+netdia netbox portfolio      [-o file] [--theme <id>] [--yaml]
+netdia netbox system <slug>  [-o file] [--theme <id>] [--yaml]
 ```
 
 `validate` exits non-zero on error, so it drops straight into CI.
@@ -72,12 +76,13 @@ Roles: `internet wan router firewall loadbalancer core distribution access
 wireless server hypervisor storage container service client appliance`.
 Media: `copper fiber virtual wireless wan console`.
 
-Two worked examples ship with the project:
+Three worked examples ship with the project:
 
 | File | Scale | Purpose |
 |---|---|---|
 | `examples/iac-lab.netdia.yaml` | 11 devices | A lab: Palo Alto and Cisco firewalls, Cisco switches, Windows and Linux servers, a hypervisor, a Git host |
 | `examples/enterprise-dc.netdia.yaml` | 59 devices, 68 links, 16 VLANs | A redundant data centre: dual WAN, HA perimeter, two cores, four distribution and four leaf switches, twelve access switches, hypervisors, storage, DMZ |
+| `examples/ise-dependencies.netdia.yaml` | 11 devices, 3 externals, 17 dependencies | A Cisco ISE policy service and everything that leans on it |
 
 The larger example exists to exercise layout, labelling and zoning at scale;
 it is covered by its own test file.
@@ -126,6 +131,106 @@ netdia freeze model.yaml --reset        # back to automatic
 can edit them by hand. The model stays the single source of truth and the diff
 shows exactly which nodes a human moved. A frozen layout that no longer covers
 every node fails loudly rather than silently dropping devices.
+
+## Dependencies
+
+L1, L2 and L3 answer "what is this connected to". They do not answer the
+question someone actually asks at 03:00, which is "if this box is down, what
+stops working". That fact lives nowhere in a cabling diagram, so it gets its
+own block and its own layer:
+
+```yaml
+externals:
+  - { id: entra, label: Microsoft Entra ID, kind: identity, owner: Identity Services }
+
+dependencies:
+  - { from: sw-acc-1, to: "ise-psn-1:radius", kind: auth, strength: hard,
+      description: 802.1X and MAB on every access port }
+  - { from: ise-psn-1, to: "srv-ntp-1:ntp", kind: ntp, strength: hard }
+  - { from: ise-pan-1, to: entra, kind: auth, strength: soft }
+```
+
+An endpoint is a device, an external system, or `<id>:<service>` naming one of
+the services that device already declares. `externals:` exists so that Entra
+ID, a vendor SaaS or a central directory can be an endpoint without becoming a
+device that floats, unlabelled and uncabled, in the L1 drawing.
+
+`strength` is required. `hard` means the consumer stops; `soft` means it
+degrades. There is deliberately no default: defaulting to `hard` would make
+every blast radius over-report, and defaulting to `soft` would hide the
+outage. It is one word, and it is the word that carries the meaning.
+
+The DEP layer draws consumers above providers with the arrow pointing at what
+is needed. Several services between the same pair — LDAPS and Kerberos to the
+same directory — collapse into one edge labelled `ldaps +1`, the same way
+parallel cables collapse into a LAG, because two edges between the same two
+boxes are routed onto the same line and draw on top of each other.
+
+The tab and the file appear only when the model declares dependencies. An
+empty dependency diagram is not an empty drawing, it is a claim that nothing
+depends on anything.
+
+Clicking any device, on **any** layer, lists **Used by** and **Depends on**
+with the service, the strength and the reason, and each entry jumps to that
+system on the DEP layer. Those are direct neighbours only. Following the chain
+further and presenting the result as fact would give an inference the same
+weight as something a human actually wrote down.
+
+Validation refuses a dependency on a system or a service that is not declared,
+a system that depends on itself, and an id shared between a device and an
+external — the two share one namespace, so a collision makes the endpoint
+ambiguous. A cycle of hard dependencies is a warning, not an error: mutual
+dependencies are real, and the drawing's job is to show that nothing in the
+cycle can start without the rest.
+
+## NetBox
+
+A model you type by hand is a second source of truth for facts something else
+already owns, and two sources of truth for one cable is exactly the drift this
+project was written against. Where NetBox is in use, netdia reads from it
+instead:
+
+```bash
+export NETBOX_URL="http://localhost:8000"
+export NETBOX_TOKEN="Bearer nbt_xxxx.yyyy"     # NetBox 4.7+; "Token xxxx" before that
+
+netdia netbox portfolio -o out/portfolio.html  # the systems and what they need
+netdia netbox system ise -o out/ise.html       # one system's cabling and addressing
+```
+
+The division of labour follows what each tool can actually hold. NetBox owns
+inventory: devices, cables, interfaces, addresses, VLANs. It has no concept of
+one service depending on another — its `Service` is an L7 listener bound to a
+box — so that is what netdia's model adds, and it is the only thing a human
+writes by hand.
+
+| Concept | Where it lives |
+|---|---|
+| A system | A NetBox **tenant** |
+| Which system a device belongs to | `Device.tenant` — one box, one system |
+| What a system needs to work | `dependencies`, a JSON custom field on the tenant |
+| Risk card: owner, criticality, RTO/RPO, last reviewed | Custom fields on the tenant |
+| Layout curation | `layout:` in a netdia file — the one thing NetBox has no place for |
+
+The `dependencies` custom field is validated by netdia's own JSON Schema,
+pasted into NetBox's `validation_schema`. NetBox then rejects a missing
+`strength`, an unknown `kind` or a stray key at the point of entry, so the
+same contract holds whether a fact arrives through the API or the UI.
+
+Membership and delivery are different relations, and conflating them is the
+usual modelling mistake. `core-01` **belongs to** Kjernenett — one owner. That
+Kontornett, OT-nett and Gjestenett all **depend on** Kjernenett is three
+edges. The multiplicity lives in the edge, not in the membership, which is
+also what makes "infrastructure is itself a service" fall out for free: a
+network and a platform are both tenants, differing only in their group.
+
+The resolver produces the same plain object the YAML loader produces, so every
+layer, renderer and viewer works unchanged — and `--yaml` writes that object
+out, which is how you pin a drawing to a revision or diff what NetBox changed.
+
+A layer appears only when the facts to draw it exist. A portfolio has no
+cabling, so it has no L1 tab; a NetBox with no VLANs produces no L2. An empty
+tab would assert an absence nobody stated.
 
 ## Themes
 
@@ -215,7 +320,7 @@ Static exports shrink accordingly: the enterprise L1 goes 177 KB → 79 KB.
 `netdia render` produces one HTML file with no external requests — no CDN, no
 web fonts, no network at all. It opens from a USB stick in a plant room.
 
-Tabs for L1, L2, L3, ISO and 3D; pan and zoom; a level-of-detail control;
+Tabs for L1, L2, L3, DEP, ISO and 3D; pan and zoom; a level-of-detail control;
 click-to-inspect on both devices and links; search across hostnames, IPs,
 VLAN ids and port names; SVG and PNG export; and print-to-PDF.
 
@@ -227,6 +332,7 @@ are on rather than calling everything a cable:
 | L1 | a physical cable | "SW-CORE-1 `Eth1/11` <-> SW-DIST-1 `Te1/0/1`", media, speed, LAG members, and the VLANs the trunk carries |
 | L2 | VLAN membership | "SW-DIST-1 **is a member of** VLAN 10", or **is the gateway for** when the device has the SVI |
 | L3 | an attachment or an adjacency | "SW-CORE-1 `Vlan10` `10.20.10.1/24` **attaches to** `10.20.10.0/24`", or "RTR-WAN-1 **routes via** Internet" |
+| DEP | a thing one system needs | "SW-ACC-1 **needs** ISE-PSN-1", the services it runs over, and the author's reason |
 
 The VLANs carried on a cable are derived, not authored: they are the
 intersection of the two endpoint interfaces' VLAN sets. Endpoint names in the
@@ -262,25 +368,29 @@ is carried by a short text mark, which is accurate and unrestricted.
 npm test
 ```
 
-64 tests covering validation rules, layer derivation, tier ordering, zone-hull
+117 tests covering validation rules, layer derivation, tier ordering, zone-hull
 and zone-plate fallbacks, minimum zone gutters on each axis, SVG
 well-formedness in every theme, XML escaping, viewBox containment for both
 renderers, isometric depth ordering, face-matrix orientation, faceplate/port
 agreement between the two views, freeze round-trips, and a scale suite that
 holds the 59-device example to a readable aspect ratio, keeps isometric cable
 crossings under 5%, proves that lowering detail never removes a device, a
-cable or a name, and asserts that edge detail never repeats a fact the edge
-already carries.
+cable or a name, asserts that edge detail never repeats a fact the edge
+already carries, a dependency suite that locks the endpoint grammar, the
+merge, the cycle report and the agreement between the impact panel's counts
+and the arrows actually drawn, and a NetBox suite that pins the vocabulary
+mapping and resolves a fake API into a model that renders.
 
 ## Layout of the repository
 
 ```
 bin/netdia.mjs        CLI
-src/model/            schema, loader, validator, layer derivation
+src/model/            schema, loader, validator, layer derivation, impact map
+src/netbox/           REST client and the NetBox -> model resolver
 src/layout/           ELK layout, role tiers, freeze
 src/render2d/         flat SVG renderer, isometric renderer, icon set
 src/render3d/         three.js stacked-layer scene (+ prebuilt bundle)
 src/theme/            theme tokens
 src/viewer/           HTML viewer shell, CSS, runtime
-examples/             worked example
+examples/             worked examples
 ```

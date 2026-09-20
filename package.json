@@ -14,7 +14,8 @@
   "scripts": {
     "test": "node --test test/",
     "build:3d": "esbuild src/render3d/scene.mjs --bundle --minify --format=esm --outfile=src/render3d/scene.bundle.js",
-    "example": "node bin/netdia.mjs render examples/iac-lab.netdia.yaml -o out/iac-lab.html"
+    "example": "node bin/netdia.mjs render examples/iac-lab.netdia.yaml -o out/iac-lab.html",
+    "example:deps": "node bin/netdia.mjs render examples/ise-dependencies.netdia.yaml -o out/ise-dependencies.html"
   },
   "dependencies": {
     "ajv": "^8.17.1",

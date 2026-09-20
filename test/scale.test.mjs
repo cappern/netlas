@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { loadModel } from '../src/model/load.mjs';
 import { validateModel } from '../src/model/validate.mjs';
-import { deriveLayer, LAYERS } from '../src/model/derive.mjs';
+import { deriveLayer, layersFor } from '../src/model/derive.mjs';
 import { layoutGraph, MAX_TIER_WIDTH } from '../src/layout/index.mjs';
 import { renderSvg } from '../src/render2d/svg.mjs';
 import { renderIsometric } from '../src/render2d/isometric.mjs';
@@ -22,7 +22,7 @@ test('the enterprise example is valid and non-trivial', () => {
 test('no tier is drawn wider than the wrap limit', async () => {
   // A tier drawn as one long row is what turns a large network into a
   // diagram you can only read by panning.
-  for (const layer of LAYERS) {
+  for (const layer of layersFor(model)) {
     const g = deriveLayer(model, layer);
     const p = await layoutGraph(g);
     const rows = new Map();
@@ -42,7 +42,7 @@ test('no tier is drawn wider than the wrap limit', async () => {
 test('a large network still produces a readable aspect ratio', async () => {
   // Panning a 4:1 drawing is not reading it. Both renderers have to stay
   // within something a screen or a page can show.
-  for (const layer of LAYERS) {
+  for (const layer of layersFor(model)) {
     const g = deriveLayer(model, layer);
     const p = await layoutGraph(g);
     const flat = p.width / p.height;
@@ -78,7 +78,7 @@ test("wrapping keeps a tier's siblings together", async () => {
 });
 
 test('every layer renders at scale without losing a node or an edge', async () => {
-  for (const layer of LAYERS) {
+  for (const layer of layersFor(model)) {
     const g = deriveLayer(model, layer);
     const p = await layoutGraph(g);
     const svg = renderSvg(g, p, getTheme('signal'));

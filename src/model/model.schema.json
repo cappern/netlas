@@ -89,6 +89,54 @@
       }
     },
 
+    "externals": {
+      "type": "array",
+      "description": "Systems outside this diagram that dependencies may point at. Kept out of devices: so they never appear in L1/L2/L3.",
+      "items": {
+        "type": "object",
+        "required": ["id"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "$ref": "#/definitions/id" },
+          "label": { "type": "string" },
+          "kind": {
+            "enum": ["identity", "saas", "vendor", "internal-service", "directory", "pki", "monitoring", "unknown"]
+          },
+          "owner": { "type": "string" },
+          "url": { "type": "string" },
+          "notes": { "type": "string" },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "services": { "type": "array", "items": { "$ref": "#/definitions/service" } }
+        }
+      }
+    },
+
+    "dependencies": {
+      "type": "array",
+      "description": "Directed 'A needs B to work' facts between devices, their services, and external systems.",
+      "items": {
+        "type": "object",
+        "required": ["from", "to", "strength"],
+        "additionalProperties": false,
+        "properties": {
+          "from": { "$ref": "#/definitions/depEndpoint" },
+          "to": { "$ref": "#/definitions/depEndpoint" },
+          "kind": {
+            "enum": [
+              "transport", "compute",
+              "auth", "dns", "ntp", "pki", "logging", "monitoring", "api",
+              "database", "storage", "backup", "management", "sync", "license", "other"
+            ]
+          },
+          "strength": {
+            "enum": ["hard", "soft"],
+            "description": "hard: the consumer stops working without it. soft: degraded but running. Required — a documentation tool must not guess severity."
+          },
+          "description": { "type": "string" }
+        }
+      }
+    },
+
     "links": {
       "type": "array",
       "items": {
@@ -194,6 +242,12 @@
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*(:[^:]+)?$",
       "description": "device-id or device-id:interface-name"
     },
+    "depEndpoint": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:+/ -]*$",
+      "description": "device-id, external-id, or <id>:<service-name>. Resolved whole-string first, so an id containing a colon still works."
+    },
     "interface": {
       "type": "object",
       "required": ["name"],
@@ -219,7 +273,14 @@
       "required": ["name"],
       "additionalProperties": false,
       "properties": {
-        "name": { "type": "string" },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._+/ -]*$",
+          "description": "No colons: a dependency endpoint splits on the last colon to find the service."
+        },
+        "label": { "type": "string" },
+        "critical": { "type": "boolean", "description": "Losing this service takes the device out of service." },
         "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
         "proto": { "enum": ["tcp", "udp", "http", "https", "ssh", "grpc"] },
         "url": { "type": "string" },

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { loadModel, parseModel } from '../src/model/load.mjs';
-import { deriveLayer, LAYERS } from '../src/model/derive.mjs';
+import { deriveLayer, layersFor } from '../src/model/derive.mjs';
 import { layoutGraph } from '../src/layout/index.mjs';
 import { renderSvg } from '../src/render2d/svg.mjs';
 import { renderIsometric } from '../src/render2d/isometric.mjs';
@@ -14,7 +14,7 @@ const theme = getTheme('signal');
 test('every derived edge on every layer carries a kind and a detail', () => {
   // The inspector switches on kind and reads nothing but detail, so an edge
   // missing either renders as an empty panel rather than failing loudly.
-  for (const layer of LAYERS) {
+  for (const layer of layersFor(model)) {
     const g = deriveLayer(model, layer);
     assert.ok(g.edges.length > 0, `${layer} has no edges to check`);
     for (const e of g.edges) {
@@ -132,8 +132,8 @@ test('edge detail never repeats a fact the edge already carries', () => {
   // Two places to read the same fact is how a payload starts disagreeing with
   // itself. The viewer reads ports, media and speed from the edge; detail is
   // strictly the remainder.
-  const forbidden = ['media', 'speed', 'aPort', 'bPort', 'aDevice', 'bDevice', 'device', 'iface', 'ip', 'from', 'to'];
-  for (const layer of ['l1', 'l2', 'l3']) {
+  const forbidden = ['media', 'speed', 'aPort', 'bPort', 'aDevice', 'bDevice', 'device', 'iface', 'ip', 'from', 'to', 'consumer', 'provider', 'a', 'b'];
+  for (const layer of layersFor(model)) {
     for (const e of deriveLayer(model, layer).edges) {
       for (const key of forbidden) {
         assert.ok(

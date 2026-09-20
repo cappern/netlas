@@ -1,4 +1,4 @@
-import { parseEndpoint, indexModel } from './load.mjs';
+import { parseEndpoint, indexModel, resolveDepEndpoint } from './load.mjs';
 import { ifaceVlans, contains, networkOf } from './validate.mjs';
 
 /**
@@ -14,14 +14,45 @@ import { ifaceVlans, contains, networkOf } from './validate.mjs';
  * }
  */
 
+/**
+ * The three structural layers. Every model has them, so the invariants that
+ * hold for "all layers" — every node is placed, every edge carries detail —
+ * are expressed against this list.
+ */
 export const LAYERS = ['l1', 'l2', 'l3'];
+
+/** ...plus the layers that exist only when the model carries the facts. */
+export const ALL_LAYERS = [...LAYERS, 'dep'];
+
+/**
+ * The layers worth drawing for this model.
+ *
+ * A layer appears only when the model carries the facts to draw it. An empty
+ * dependency diagram is not an empty drawing, it is a claim that nothing
+ * depends on anything — and the same argument applies to the other three. A
+ * portfolio of systems has no cables; a pure cabling record has no routing.
+ * Emitting the tab anyway would assert an absence the model never stated.
+ */
+export function layersFor(model) {
+  const has = {
+    l1: (model.links ?? []).length > 0,
+    l2: (model.vlans ?? []).length > 0
+      || (model.devices ?? []).some((d) => (d.interfaces ?? []).some((i) => ifaceVlans(i).length > 0)),
+    l3: (model.subnets ?? []).length > 0
+      || (model.routing ?? []).length > 0
+      || (model.devices ?? []).some((d) => (d.interfaces ?? []).some((i) => i.ip)),
+    dep: (model.dependencies ?? []).length > 0,
+  };
+  return ALL_LAYERS.filter((l) => has[l]);
+}
 
 export function deriveLayer(model, layer) {
   switch (layer) {
     case 'l1': return deriveL1(model);
     case 'l2': return deriveL2(model);
     case 'l3': return deriveL3(model);
-    default: throw new Error(`Unknown layer "${layer}". Use l1, l2 or l3.`);
+    case 'dep': return deriveDep(model);
+    default: throw new Error(`Unknown layer "${layer}". Use ${ALL_LAYERS.join(', ')}.`);
   }
 }
 
@@ -406,6 +437,143 @@ function deriveL3(model) {
       { kind: 'gateway', label: 'Default gateway' },
       { kind: 'attached', label: 'Attached interface' },
       { kind: 'routing', label: 'Routing adjacency' },
+    ],
+  };
+}
+
+/* ---- DEP: who needs whom --------------------------------------------- */
+
+/**
+ * Externals sit below every device role, because they are almost always what
+ * something else depends on rather than the other way round. When one is a
+ * consumer instead, it has to go above everything, or the arrow would run
+ * upwards and contradict the one rule this layer documents: consumers on top.
+ */
+const EXTERNAL_PROVIDER_TIER = 8;
+const EXTERNAL_CONSUMER_TIER = 0;
+
+function externalNode(e, consumes) {
+  return {
+    id: e.id,
+    label: e.label,
+    sublabel: e.owner ?? e.kind ?? '',
+    kind: 'external',
+    role: 'external',
+    vendor: 'generic',
+    tier: consumes ? EXTERNAL_CONSUMER_TIER : EXTERNAL_PROVIDER_TIER,
+    // externalCard draws no badges; the kind is already the sublabel.
+    badges: [],
+    detail: {
+      external: true,
+      kind: e.kind,
+      owner: e.owner,
+      url: e.url,
+      notes: e.notes,
+      tags: e.tags,
+      services: e.services ?? [],
+    },
+  };
+}
+
+function deriveDep(model) {
+  const ix = indexModel(model);
+  const deps = model.dependencies ?? [];
+
+  const holders = new Set();
+  const consumers = new Set();
+  for (const d of deps) {
+    const from = resolveDepEndpoint(d.from, ix);
+    const to = resolveDepEndpoint(d.to, ix);
+    if (from.holder) { holders.add(from.holder); consumers.add(from.holder); }
+    if (to.holder) holders.add(to.holder);
+  }
+
+  // Declaration order, not discovery order: ELK is seeded on model order
+  // (elk.layered.considerModelOrder) and freeze writes the result to disk, so
+  // a traversal-dependent order would churn both the drawing and the diff.
+  const nodes = [
+    ...model.devices.filter((d) => holders.has(d.id)).map(deviceNode),
+    ...(model.externals ?? [])
+      .filter((e) => holders.has(e.id))
+      .map((e) => externalNode(e, consumers.has(e.id))),
+  ];
+
+  // Several services between the same pair collapse into one edge, exactly as
+  // parallel cables collapse into a LAG. Two lines between the same two boxes
+  // land on the same orthogonal route and would draw on top of each other.
+  // `kind` is part of the key because it picks the edge's colour: merging
+  // "auth" with "logging" would leave that undecidable.
+  const merged = new Map();
+  const edges = [];
+
+  const labelFor = (services, kind) => {
+    if (services.length === 0) return kind;
+    if (services.length === 1) return services[0].name;
+    return `${services[0].name} +${services.length - 1}`;
+  };
+
+  deps.forEach((dep, n) => {
+    const from = resolveDepEndpoint(dep.from, ix);
+    const to = resolveDepEndpoint(dep.to, ix);
+    if (!from.holder || !to.holder) return;
+
+    // The service object is the provider's own declaration, not a copy of the
+    // dependency row: the reason lives once, in detail.descriptions.
+    const service = to.service
+      ? { name: to.service, ...(ix.serviceOf(to.holder, to.service) ?? {}) }
+      : null;
+
+    const key = `${from.holder}~${to.holder}~${dep.kind}~${dep.strength}`;
+    if (merged.has(key)) {
+      const e = merged.get(key);
+      if (service) e.detail.services.push(service);
+      if (dep.description) e.detail.descriptions.push(dep.description);
+      e.label = labelFor(e.detail.services, dep.kind);
+      return;
+    }
+
+    const edge = {
+      id: `dep-${n}`,
+      a: from.holder,
+      b: to.holder,
+      aPort: null,
+      bPort: null,
+      // A service name is prose, not port data, so it rides the centred
+      // proportional label chip rather than a monospace port chip — and it
+      // never reaches usedPorts(), which draws physical faceplates.
+      label: labelFor(service ? [service] : [], dep.kind),
+      media: `dep-${dep.strength}`,
+      directed: true,
+      kind: 'dependency',
+      detail: {
+        dependencyKind: dep.kind,
+        strength: dep.strength,
+        // Only what the edge does not already carry. a and b are the two
+        // systems and the label is the service, so what remains is the
+        // provider's service declarations and the author's reasons.
+        services: service ? [service] : [],
+        descriptions: dep.description ? [dep.description] : [],
+      },
+    };
+    merged.set(key, edge);
+    edges.push(edge);
+  });
+
+  return {
+    layer: 'dep',
+    title: model.meta.title,
+    meta: model.meta,
+    subtitle: 'Dependencies — what each system needs to work',
+    // Externals can never be members of a zone, and a node sitting inside a
+    // hull it does not belong to invalidates every hull on the drawing. An
+    // honest absence beats a zone box that vanishes depending on layout.
+    groups: [],
+    nodes,
+    edges,
+    legend: [
+      { kind: 'dep-hard', label: 'Hard — consumer stops without it' },
+      { kind: 'dep-soft', label: 'Soft — degraded but running' },
+      { kind: 'external', label: 'External system' },
     ],
   };
 }

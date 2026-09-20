@@ -112,6 +112,11 @@ const G = {
     <rect x="4.6" y="12.5" width="4.8" height="4" rx="1"/>
     <rect x="14.6" y="12.5" width="4.8" height="4" rx="1"/>
     <path d="M12 12.5v6"/>`,
+
+  external: `
+    <path d="M6.5 18.5h11a4 4 0 0 0 .6-7.95 6 6 0 0 0-11.5-1.6A3.9 3.9 0 0 0 6.5 18.5z"/>
+    <path d="M12 8.5v6"/>
+    <path d="M9.5 12 12 14.5 14.5 12"/>`,
 };
 
 G.internet = G.internet.trim();

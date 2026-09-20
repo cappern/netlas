@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import Ajv from 'ajv';
-import { parseEndpoint, indexModel } from './load.mjs';
+import { parseEndpoint, indexModel, resolveDepEndpoint } from './load.mjs';
 
 const schema = JSON.parse(
   readFileSync(fileURLToPath(new URL('./model.schema.json', import.meta.url)), 'utf8'),
@@ -38,6 +38,7 @@ export function validateModel(model) {
   checkLinks(model, ix, errors, warnings);
   checkAddressing(model, ix, errors, warnings);
   checkConnectivity(model, ix, warnings);
+  checkDependencies(model, ix, errors, warnings);
 
   return { ok: errors.length === 0, errors, warnings };
 }
@@ -56,6 +57,7 @@ function checkUniqueIds(model, errors) {
     ['site', model.sites, 'id'],
     ['vlan', model.vlans, 'id'],
     ['subnet', model.subnets, 'cidr'],
+    ['external', model.externals ?? [], 'id'],
   ]) {
     for (const d of dupes(list.map((x) => x[key]))) {
       errors.push({
@@ -63,6 +65,20 @@ function checkUniqueIds(model, errors) {
         subject: `${kind}:${d}`,
         message: `Duplicate ${kind} ${key} "${d}"`,
         fix: `Give each ${kind} a unique ${key}`,
+      });
+    }
+  }
+  // Devices and externals share one namespace, because a dependency endpoint
+  // resolves against both. A collision makes the endpoint ambiguous, and the
+  // per-list check above cannot see across lists.
+  const deviceIds = new Set(model.devices.map((d) => d.id));
+  for (const e of model.externals ?? []) {
+    if (deviceIds.has(e.id)) {
+      errors.push({
+        code: 'ID_COLLISION',
+        subject: `external:${e.id}`,
+        message: `"${e.id}" is both a device and an external; dependency endpoints could not tell them apart`,
+        fix: 'Rename one of them',
       });
     }
   }
@@ -242,6 +258,12 @@ function checkAddressing(model, ix, errors, warnings) {
 }
 
 function checkConnectivity(model, ix, warnings) {
+  // The warning's claim is that the device floats *in the L1 diagram*. A model
+  // with no cabling at all has no L1 diagram to float in — a portfolio of
+  // systems, for instance — so the claim would be false for every device in
+  // it. Absence of the whole layer is louder feedback than a warning per node.
+  if (model.links.length === 0) return;
+
   const linked = new Set();
   for (const l of model.links) {
     linked.add(parseEndpoint(l.a).device);
@@ -256,6 +278,160 @@ function checkConnectivity(model, ix, warnings) {
       });
     }
   }
+}
+
+/* ---- dependencies ----------------------------------------------------- */
+
+function checkDependencies(model, ix, errors, warnings) {
+  const deps = model.dependencies ?? [];
+  const referenced = new Set();
+  const consumes = new Set();
+  const provides = new Set();
+
+  deps.forEach((dep, n) => {
+    const subject = `dependency[${n}] ${dep.from} -> ${dep.to}`;
+    const ends = {};
+
+    for (const side of ['from', 'to']) {
+      const r = resolveDepEndpoint(dep[side], ix);
+      ends[side] = r;
+      if (!r.kind) {
+        errors.push({
+          code: 'UNKNOWN_DEPENDENCY_ENDPOINT',
+          subject,
+          message: `Dependency ${side} "${dep[side]}" is neither a device nor an external system`,
+          fix: `Declare it under devices: or externals:, or write "<id>:<service>"`,
+        });
+        continue;
+      }
+      referenced.add(r.holder);
+      if (r.kind === 'external') (side === 'from' ? consumes : provides).add(r.holder);
+      if (r.service && !ix.serviceOf(r.holder, r.service)) {
+        errors.push({
+          code: 'UNKNOWN_SERVICE',
+          subject,
+          message: `"${r.holder}" declares no service named "${r.service}"`,
+          fix: `Add "- name: ${r.service}" under ${r.holder}.services`,
+        });
+      }
+    }
+
+    if (ends.from.holder && ends.from.holder === ends.to.holder) {
+      errors.push({
+        code: 'SELF_DEPENDENCY',
+        subject,
+        message: `"${ends.from.holder}" is declared as depending on itself`,
+        fix: 'A dependency records what one system needs from another',
+      });
+    }
+  });
+
+  const consumesAndProvides = [...consumes].filter((id) => provides.has(id));
+
+  for (const cycle of hardCycles(deps, ix)) {
+    warnings.push({
+      code: 'DEPENDENCY_CYCLE',
+      subject: `dependency:${cycle[0]}`,
+      message: `Hard dependency cycle: ${cycle.join(' -> ')}`,
+      fix: 'If this is real, say so in description:; nothing in the cycle can start without the rest',
+    });
+  }
+
+  // The dep layer pins an external either above everything (it consumes) or
+  // below everything (it provides). One that does both cannot be placed so
+  // that every arrow still points downward, and the layer's only reading rule
+  // would break silently.
+  for (const id of consumesAndProvides) {
+    warnings.push({
+      code: 'EXTERNAL_BOTH_WAYS',
+      subject: `external:${id}`,
+      message: `External "${id}" is both a consumer and a provider, so the DEP layer cannot draw every arrow pointing downward`,
+      fix: 'Split it into two externals, or model the consuming side as a device',
+    });
+  }
+
+  for (const e of model.externals ?? []) {
+    if (!referenced.has(e.id)) {
+      warnings.push({
+        code: 'UNUSED_EXTERNAL',
+        subject: `external:${e.id}`,
+        message: `External "${e.id}" is declared but no dependency points at it`,
+        fix: 'Reference it from dependencies:, or remove it',
+      });
+    }
+  }
+}
+
+/**
+ * Cycles over hard dependencies only. Soft ones are excluded because a soft
+ * cycle degrades rather than deadlocks, and reporting it would bury the case
+ * that actually cannot boot.
+ *
+ * Plain three-colour DFS: white (absent), grey (on stack), black (done).
+ * Roots are visited in declaration order so the reported cycle is stable.
+ */
+function hardCycles(deps, ix) {
+  const out = new Map();
+  const holderOf = (ep) => resolveDepEndpoint(ep, ix).holder;
+
+  // A Set, so N identical declared rows do not become N redundant traversals.
+  const adj = new Map();
+  const order = [];
+  for (const d of deps) {
+    if (d.strength !== 'hard') continue;
+    const a = holderOf(d.from);
+    const b = holderOf(d.to);
+    if (!a || !b || a === b) continue;
+    if (!adj.has(a)) { adj.set(a, new Set()); order.push(a); }
+    if (!adj.has(b)) { adj.set(b, new Set()); order.push(b); }
+    adj.get(a).add(b);
+  }
+
+  // Iterative rather than recursive: a long dependency chain is a plausible
+  // model, and a validator that dies with a RangeError on one is worse than
+  // no validator. The frame carries its own child iterator so the traversal
+  // order is identical to the recursive form.
+  const state = new Map();
+  const stack = [];
+  for (const root of order) {
+    if (state.has(root)) continue;
+    const frames = [{ id: root, next: (adj.get(root) ?? new Set()).values() }];
+    state.set(root, 'grey');
+    stack.push(root);
+
+    while (frames.length > 0) {
+      const frame = frames[frames.length - 1];
+      const step = frame.next.next();
+      if (step.done) {
+        frames.pop();
+        stack.pop();
+        state.set(frame.id, 'black');
+        continue;
+      }
+      const next = step.value;
+      if (state.get(next) === 'grey') {
+        const cycle = stack.slice(stack.indexOf(next)).concat(next);
+        if (!out.has(cycleKey(cycle))) out.set(cycleKey(cycle), cycle);
+      } else if (!state.has(next)) {
+        state.set(next, 'grey');
+        stack.push(next);
+        frames.push({ id: next, next: (adj.get(next) ?? new Set()).values() });
+      }
+    }
+  }
+  return [...out.values()];
+}
+
+/**
+ * Identify a cycle by its rotation, not by its set of members: a -> b -> c -> a
+ * and a -> c -> b -> a run through the same three systems but are two
+ * different outages, and collapsing them would hide one.
+ */
+function cycleKey(cycle) {
+  const ring = cycle.slice(0, -1);
+  let at = 0;
+  for (let i = 1; i < ring.length; i++) if (ring[i] < ring[at]) at = i;
+  return ring.slice(at).concat(ring.slice(0, at)).join('|');
 }
 
 /* ---- IPv4 helpers ---------------------------------------------------- */

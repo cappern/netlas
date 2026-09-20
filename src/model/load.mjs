@@ -33,7 +33,24 @@ export function loadModel(path) {
   return parseModel(readFileSync(abs, 'utf8'), abs);
 }
 
-/** Fill in defaults and derived conveniences without inventing facts. */
+/**
+ * Apply the same defaults to a model built in memory as to one parsed from a
+ * file. Any producer — the YAML loader, the NetBox resolver, a future
+ * importer — must come through here, or it will hand downstream code an
+ * object that is subtly a different shape.
+ */
+export function normalizeModel(raw) {
+  return normalize(raw);
+}
+
+/**
+ * Fill in defaults and derived conveniences without inventing facts.
+ *
+ * This object literal is a whitelist: a top-level key that is not listed here
+ * is dropped before validateModel() ever sees it, and because the schema runs
+ * against the *normalized* model its additionalProperties:false cannot report
+ * the loss. Any new top-level key must be added here or it vanishes silently.
+ */
 function normalize(raw) {
   const m = {
     meta: { ...raw.meta },
@@ -44,6 +61,8 @@ function normalize(raw) {
     vlans: raw.vlans ?? [],
     subnets: raw.subnets ?? [],
     routing: raw.routing ?? [],
+    externals: raw.externals ?? [],
+    dependencies: raw.dependencies ?? [],
     layout: raw.layout ?? {},
   };
   for (const d of m.devices) {
@@ -57,6 +76,17 @@ function normalize(raw) {
   for (const s of m.sites) s.label ??= s.id;
   for (const z of m.zones) z.label ??= z.id;
   for (const v of m.vlans) v.name ??= `VLAN${v.id}`;
+  for (const e of m.externals) {
+    // nodeSize() reads node.label.length unguarded.
+    e.label ??= e.id;
+    e.kind ??= 'unknown';
+    e.services ??= [];
+  }
+  // `kind` defaults to the neutral value, as media and routing kind do.
+  // `strength` deliberately has no default: it is required by the schema,
+  // because defaulting to the severest value would make every blast radius
+  // over-report, and defaulting to the mildest would hide real risk.
+  for (const dep of m.dependencies) dep.kind ??= 'other';
   return m;
 }
 
@@ -84,7 +114,41 @@ export function indexModel(model) {
   const sites = new Map(model.sites.map((s) => [s.id, s]));
   const vlans = new Map(model.vlans.map((v) => [v.id, v]));
   const subnets = new Map(model.subnets.map((s) => [s.cidr, s]));
+  const externals = new Map((model.externals ?? []).map((e) => [e.id, e]));
   const ifaceOf = (devId, name) =>
     devices.get(devId)?.interfaces.find((i) => i.name === name) ?? null;
-  return { devices, zones, sites, vlans, subnets, ifaceOf };
+  const serviceOf = (holderId, name) => {
+    const holder = devices.get(holderId) ?? externals.get(holderId);
+    return holder?.services?.find((s) => s.name === name) ?? null;
+  };
+  return { devices, zones, sites, vlans, subnets, externals, ifaceOf, serviceOf };
 }
+
+/**
+ * Resolve a dependency endpoint against the device + external namespace.
+ *
+ * Deliberately not parseEndpoint(): a link endpoint is device:interface and
+ * interface names never contain a colon, so splitting on the *first* colon is
+ * safe there. Here the left side may itself contain a colon — definitions/id
+ * permits it — so a whole-string match must win before any splitting, and the
+ * split is on the LAST colon so that "dc1:ise:radius" reads as the service
+ * "radius" on the device "dc1:ise".
+ *
+ * @returns {{ holder: string|null, service: string|null, kind: 'device'|'external'|null, raw: string }}
+ */
+export function resolveDepEndpoint(ep, ix) {
+  const whole = (id) =>
+    ix.devices.has(id) ? 'device' : ix.externals.has(id) ? 'external' : null;
+
+  const direct = whole(ep);
+  if (direct) return { holder: ep, service: null, kind: direct, raw: ep };
+
+  const cut = ep.lastIndexOf(':');
+  if (cut > 0) {
+    const holder = ep.slice(0, cut);
+    const found = whole(holder);
+    if (found) return { holder, service: ep.slice(cut + 1), kind: found, raw: ep };
+  }
+  return { holder: null, service: null, kind: null, raw: ep };
+}
+

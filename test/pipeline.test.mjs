@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadModel, parseModel } from '../src/model/load.mjs';
 import { validateModel } from '../src/model/validate.mjs';
-import { deriveLayer, LAYERS } from '../src/model/derive.mjs';
+import { deriveLayer, layersFor } from '../src/model/derive.mjs';
 import { layoutGraph, groupHulls } from '../src/layout/index.mjs';
 import { freezeLayout } from '../src/layout/freeze.mjs';
 import { renderSvg, usedPorts } from '../src/render2d/svg.mjs';
@@ -85,7 +85,7 @@ test('L3 routing adjacencies are directed unless declared bidirectional', () => 
 });
 
 test('every layer lays out with positions for every node and edge', async () => {
-  for (const layer of LAYERS) {
+  for (const layer of layersFor(model)) {
     const g = deriveLayer(model, layer);
     const p = await layoutGraph(g);
     assert.equal(p.nodes.size, g.nodes.length, layer);
@@ -130,7 +130,7 @@ test('every theme renders well-formed SVG that contains the content', async () =
 });
 
 test('every drawn box fits inside the viewBox once the content offset is applied', async () => {
-  for (const layer of LAYERS) {
+  for (const layer of layersFor(model)) {
     const g = deriveLayer(model, layer);
     const p = await layoutGraph(g);
     const svg = renderSvg(g, p, getTheme('signal'));
@@ -209,7 +209,7 @@ test('a stale frozen layout fails loudly instead of dropping nodes', async () =>
 });
 
 test('an unknown layer or theme is rejected by name', () => {
-  assert.throws(() => deriveLayer(model, 'l4'), /l1, l2 or l3/);
+  assert.throws(() => deriveLayer(model, 'l4'), /l1, l2, l3, dep/);
   assert.throws(() => getTheme('neon'), /Available:/);
 });
 

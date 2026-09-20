@@ -241,6 +241,9 @@
   function select(id, layerId) {
     var node = findNode(id, layerId);
     if (!node) return;
+    // show() closes the inspector and refits, so the tab switch has to happen
+    // before anything is written into the panel, not after.
+    if (layerId && layerId !== current && layerById(layerId)) show(layerId);
     inspector.innerHTML = inspectorHtml(node);
     openInspector();
     highlight(id);
@@ -265,7 +268,7 @@
 
   inspector.addEventListener('click', function (e) {
     var goto = e.target.closest('[data-goto]');
-    if (goto) select(goto.dataset.goto);
+    if (goto) select(goto.dataset.goto, goto.dataset.gotoLayer || null);
   });
 
   function closeInspector() {
@@ -387,8 +390,10 @@
       '</div>';
   }
 
-  function goTo(id, label) {
-    return '<button type="button" class="nd-pill" data-goto="' + esc(id) + '">' + esc(label) + '</button>';
+  function goTo(id, label, layerId) {
+    return '<button type="button" class="nd-pill" data-goto="' + esc(id) + '"' +
+      (layerId ? ' data-goto-layer="' + esc(layerId) + '"' : '') +
+      '>' + esc(label) + '</button>';
   }
 
   function edgeInspectorHtml(edge, layer) {
@@ -454,6 +459,32 @@
         if (afacts) out += '<div class="nd-sect"><h3>Facts</h3>' + afacts + '</div>';
         break;
       }
+      case 'dependency': {
+        var hard = d.strength === 'hard';
+        out += inspectorHead('DEPENDENCY', String(d.dependencyKind || 'other').toUpperCase(),
+          hard ? 'Hard — the consumer stops without it' : 'Soft — degraded but running');
+        out += '<div class="nd-sect"><h3>Relationship</h3><p style="margin:0;font-size:11.5px;color:var(--nd-text-muted)">' +
+          goTo(edge.a, labelOf(layer, edge.a), layer.id) +
+          ' <b>' + (hard ? 'needs' : 'uses') + '</b> ' +
+          goTo(edge.b, labelOf(layer, edge.b), layer.id) +
+          '</p></div>';
+        var svc = d.services || [];
+        if (svc.length) {
+          out += '<div class="nd-sect"><h3>Via services &middot; ' + svc.length + '</h3>' +
+            svc.map(function (s) {
+              var right = [s.proto, s.port].filter(Boolean).join(' ');
+              return '<div class="nd-iface"><b>' + esc(s.name) + '</b><span>' + esc(right) + '</span>' +
+                (s.notes ? '<small>' + esc(s.notes) + '</small>' : '') + '</div>';
+            }).join('') + '</div>';
+        }
+        var descs = d.descriptions || [];
+        if (descs.length) {
+          out += '<div class="nd-sect"><h3>Why</h3>' + descs.map(function (t) {
+            return '<p style="margin:0 0 6px;font-size:11.5px;color:var(--nd-text-muted)">' + esc(t) + '</p>';
+          }).join('') + '</div>';
+        }
+        break;
+      }
       default: {
         var rk = String(d.routingKind || 'static').toUpperCase();
         out += inspectorHead('ROUTING ADJACENCY', 'Route',
@@ -470,6 +501,58 @@
       }
     }
 
+    return out;
+  }
+
+  /**
+   * Direct dependency neighbours, from the one global map rather than from
+   * the node — the same device appears on four layers, and the inspector
+   * does not know which one it is looking at.
+   *
+   * Direct only. Following the chain further would present an inference with
+   * the same confidence as a declared fact.
+   */
+  function impactHtml(id) {
+    var entry = (P.impact || {})[id];
+    if (!entry) return '';
+    var hasDep = (entry.dependsOn || []).length > 0;
+    var hasUse = (entry.usedBy || []).length > 0;
+    if (!hasDep && !hasUse) return '';
+
+    var hasDepLayer = !!layerById('dep');
+    var row = function (e) {
+      var right = [e.kind, e.strength].filter(Boolean).join(' · ');
+      var svc = (e.services || []).map(esc).join(', ');
+      var why = (e.descriptions || []).map(esc).join(' &middot; ');
+      var small = [svc, why].filter(Boolean).join(' &middot; ');
+      return '<div class="nd-iface"><b>' +
+        goTo(e.id, e.label, hasDepLayer ? 'dep' : null) + '</b>' +
+        '<span>' + esc(right) + '</span>' +
+        (small ? '<small>' + small + '</small>' : '') +
+        '</div>';
+    };
+
+    // One row per drawn arrow, so the panel and the picture agree — but the
+    // heading counts systems, because "used by 3" next to two named systems
+    // reads as a third one the reader has failed to spot.
+    var systems = function (list) {
+      var ids = {};
+      var n = 0;
+      for (var i = 0; i < list.length; i++) {
+        if (!ids[list[i].id]) { ids[list[i].id] = true; n++; }
+      }
+      return n;
+    };
+
+    var out = '';
+    if (hasUse) {
+      out += '<div class="nd-sect"><h3>Used by &middot; ' + systems(entry.usedBy) + '</h3>' +
+        entry.usedBy.map(row).join('') + '</div>';
+    }
+    if (hasDep) {
+      out += '<div class="nd-sect"><h3>Depends on &middot; ' + systems(entry.dependsOn) + '</h3>' +
+        entry.dependsOn.map(row).join('') + '</div>';
+    }
     return out;
   }
 
@@ -514,6 +597,19 @@
           d.tags.map(function (t) { return '<span class="nd-pill">' + esc(t) + '</span>'; }).join('') + '</div>';
       }
       if (d.notes) out += '<div class="nd-sect"><h3>Notes</h3><p style="margin:0;font-size:11.5px;color:var(--nd-text-muted)">' + esc(d.notes) + '</p></div>';
+      out += impactHtml(node.id);
+    } else if (node.kind === 'external') {
+      out += '<div class="nd-sect"><h3>Outside this drawing</h3>' + kv([
+        ['Kind', d.kind], ['Owner', d.owner], ['URL', d.url],
+      ]) + '</div>';
+      var esvcs = d.services || [];
+      if (esvcs.length) {
+        out += '<div class="nd-sect"><h3>Services</h3>' + esvcs.map(function (s) {
+          return '<span class="nd-pill">' + esc(s.name) + (s.port ? ':' + s.port : '') + '</span>';
+        }).join('') + '</div>';
+      }
+      if (d.notes) out += '<div class="nd-sect"><h3>Notes</h3><p style="margin:0;font-size:11.5px;color:var(--nd-text-muted)">' + esc(d.notes) + '</p></div>';
+      out += impactHtml(node.id);
     } else if (node.kind === 'vlan') {
       out += '<div class="nd-sect"><h3>Broadcast domain</h3>' + kv([
         ['VLAN', d.vlan], ['Name', d.name], ['Subnet', d.subnet],

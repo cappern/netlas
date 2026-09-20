@@ -2,12 +2,16 @@ import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { themeToCss } from '../theme/themes.mjs';
 import { esc } from '../render2d/svg.mjs';
+import { buildImpactMap } from '../model/impact.mjs';
 
 const here = (p) => fileURLToPath(new URL(p, import.meta.url));
 
 const CSS = readFileSync(here('./viewer.css'), 'utf8');
 const JS = readFileSync(here('./viewer.js'), 'utf8');
 const THREE_BUNDLE = here('../render3d/scene.bundle.js');
+
+/** Only the three structural layers become floors in the stacked 3D view. */
+const THREE_D_FLOORS = ['l1', 'l2', 'l3'];
 
 /**
  * Assemble one self-contained HTML file.
@@ -64,6 +68,10 @@ export function renderViewer({ model, layers, theme, enable3d = true, warnings =
       fontBody: theme.fontBody, mode: theme.mode,
     },
     layers: payloadLayers,
+    // One global map, not a copy per layer: deviceNode() is called from every
+    // layer, so per-layer impact would serialise the same answer four times,
+    // and inspectorHtml() receives a node with no idea which layer it is on.
+    impact: buildImpactMap(model),
   };
 
   const tabs = layers
@@ -80,7 +88,7 @@ export function renderViewer({ model, layers, theme, enable3d = true, warnings =
 
   const tab3d = has3d
     ? `<button class="nd-tab" role="tab" data-layer="3d" aria-selected="false">` +
-      `<strong>3D</strong><span>Stack</span><em>${layers.filter((l) => l.graph.layer !== 'iso').length}</em></button>`
+      `<strong>3D</strong><span>Stack</span><em>${layers.filter((l) => THREE_D_FLOORS.includes(l.graph.layer)).length}</em></button>`
     : '';
 
   const views =
@@ -100,6 +108,7 @@ export function renderViewer({ model, layers, theme, enable3d = true, warnings =
     ['Date', model.meta.updated],
     ['Devices', String(model.devices.length)],
     ['VLANs', String(model.vlans.length)],
+    ['Dependencies', (model.dependencies ?? []).length ? String(model.dependencies.length) : ''],
   ]
     .filter(([, v]) => v)
     .map(([k, v]) => `<div class="nd-cell"><div class="micro">${esc(k)}</div><b>${esc(v)}</b></div>`)
@@ -170,7 +179,7 @@ ${has3d ? `<script type="text/plain" id="nd-3d-src">${escapeScript(threeSrc)}</s
 }
 
 function layerWord(layer) {
-  return { l1: 'Physical', l2: 'VLANs', l3: 'Routing', iso: 'Isometric' }[layer] ?? layer;
+  return { l1: 'Physical', l2: 'VLANs', l3: 'Routing', iso: 'Isometric', dep: 'Dependencies' }[layer] ?? layer;
 }
 
 /** Safe to embed inside <script type="application/json">. */

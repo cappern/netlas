@@ -975,4 +975,28 @@ routing:
   - { from: sw-core-2, to: fw-perim-2, kind: ospf, detail: "Area 0", bidirectional: true }
   - { from: sw-core-1, to: sw-core-2, kind: ospf, detail: "Area 0 peer", bidirectional: true }
 
+# Systems this drawing depends on but does not document.
+externals:
+  - { id: entra, label: Microsoft Entra ID, kind: identity, owner: Identity Services }
+  - { id: gitlab-com, label: gitlab.com, kind: saas, owner: Platform Engineering }
+
+# strength is required. hard means the consumer stops, soft means it degrades.
+dependencies:
+  - { from: srv-app-01, to: "srv-sql-01:SQL Server", kind: database, strength: hard }
+  - { from: srv-app-02, to: "srv-sql-01:SQL Server", kind: database, strength: hard }
+  - { from: srv-app-03, to: "srv-sql-02:SQL Server", kind: database, strength: hard }
+  - { from: srv-app-01, to: "srv-ad-01:Active Directory", kind: auth, strength: hard, description: Single sign-on for the application estate }
+  - { from: srv-app-01, to: "srv-ad-01:DNS", kind: dns, strength: hard }
+  - { from: srv-sql-01, to: "srv-ad-01:Active Directory", kind: auth, strength: hard }
+  - { from: srv-sql-01, to: "srv-bkp-01:Veeam repository", kind: backup, strength: soft }
+  - { from: srv-sql-01, to: "san-01:iSCSI", kind: storage, strength: hard }
+  - { from: esxi-01, to: "san-01:iSCSI", kind: storage, strength: hard, description: Datastores for every guest on this host }
+  - { from: srv-ci-01, to: "srv-git-01:GitLab", kind: api, strength: hard }
+  - { from: srv-git-01, to: gitlab-com, kind: license, strength: soft, description: Licence check and upstream mirror }
+  - { from: srv-tf-01, to: "srv-git-01:GitLab", kind: api, strength: hard, description: State backend and module registry }
+  - { from: srv-tf-01, to: entra, kind: auth, strength: hard, description: SSO is the only login path; there is no local admin }
+  - { from: fw-perim-1, to: "srv-ad-01:Active Directory", kind: auth, strength: soft, description: Admin login; local fallback account exists }
+  - { from: srv-mon-01, to: "srv-log-01:Loki", kind: logging, strength: soft }
+  - { from: srv-app-01, to: "srv-pki-01:ADCS", kind: pki, strength: hard, description: TLS certificate issuance and revocation checking }
+
 layout: {}

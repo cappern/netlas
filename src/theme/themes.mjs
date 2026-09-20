@@ -66,6 +66,7 @@ themes.signal = {
     client: '#9AA7BD',
     vlan: '#FFB454',
     network: '#4CC9F0',
+    external: '#B1789B',
   },
 
   media: {
@@ -80,6 +81,8 @@ themes.signal = {
     gateway: '#FF9F45',
     attached: '#6E809B',
     routing: '#4CC9F0',
+    'dep-hard': '#E86A8C',
+    'dep-soft': '#8E9BB5',
   },
 
   zone: {
@@ -149,6 +152,7 @@ themes.blueprint = {
     client: '#A8CDE8',
     vlan: '#FFD166',
     network: '#EAF4FC',
+    external: '#A8CDE8',
   },
 
   media: {
@@ -163,6 +167,8 @@ themes.blueprint = {
     gateway: '#FFD166',
     attached: '#6791B5',
     routing: '#EAF4FC',
+    'dep-hard': '#FF8B6B',
+    'dep-soft': '#6791B5',
   },
 
   zone: {
@@ -232,6 +238,7 @@ themes.paper = {
     client: '#5C6663',
     vlan: '#B5731E',
     network: '#1B5E8C',
+    external: '#7A4B66',
   },
 
   media: {
@@ -246,6 +253,8 @@ themes.paper = {
     gateway: '#B5321E',
     attached: '#8C9591',
     routing: '#1B5E8C',
+    'dep-hard': '#B5321E',
+    'dep-soft': '#8C9591',
   },
 
   zone: {
@@ -301,13 +310,14 @@ themes.graphite = {
     loadbalancer: '#3A3A3A', core: '#1A1A1A', distribution: '#3A3A3A', access: '#3A3A3A',
     wireless: '#5A5A5A', hypervisor: '#3A3A3A', server: '#3A3A3A', storage: '#5A5A5A',
     container: '#3A3A3A', service: '#3A3A3A', appliance: '#7A7A7A', client: '#7A7A7A',
-    vlan: '#3A3A3A', network: '#1A1A1A',
+    vlan: '#3A3A3A', network: '#1A1A1A', external: '#5A5A5A',
   },
 
   media: {
     copper: '#1A1A1A', fiber: '#1A1A1A', virtual: '#8E8E8E', wireless: '#5A5A5A',
     wan: '#000000', console: '#B0B0B0', tagged: '#1A1A1A', untagged: '#8E8E8E',
     gateway: '#000000', attached: '#8E8E8E', routing: '#1A1A1A',
+    'dep-hard': '#1A1A1A', 'dep-soft': '#8E8E8E',
   },
 
   zone: {
@@ -364,13 +374,14 @@ themes.aurora = {
     loadbalancer: '#FFB86B', core: '#5390D9', distribution: '#64DFDF', access: '#64DFDF',
     wireless: '#B388FF', hypervisor: '#80FFDB', server: '#80FFDB', storage: '#FFD166',
     container: '#80FFDB', service: '#80FFDB', appliance: '#8E96C8', client: '#9AA1D0',
-    vlan: '#FFB86B', network: '#56CFE1',
+    vlan: '#FFB86B', network: '#56CFE1', external: '#F072B6',
   },
 
   media: {
     copper: '#FFB86B', fiber: '#64DFDF', virtual: '#7C84BC', wireless: '#B388FF',
     wan: '#F072B6', console: '#4A5182', tagged: '#64DFDF', untagged: '#7C84BC',
     gateway: '#FFB86B', attached: '#6C74AC', routing: '#56CFE1',
+    'dep-hard': '#F072B6', 'dep-soft': '#7C84BC',
   },
 
   zone: {
@@ -419,6 +430,10 @@ export function dashFor(media, theme) {
     case 'untagged': return null;
     case 'attached': return '5 4';
     case 'routing': return '9 4';
+    // A soft dependency is the one fact on the dep layer that colour alone
+    // would not carry in a monochrome theme, so it is dashed everywhere.
+    case 'dep-soft': return '6 4';
+    case 'dep-hard': return null;
     default: return null;
   }
 }
@@ -430,6 +445,8 @@ export function weightFor(media, theme) {
     case 'wan': return base * 1.6;
     case 'fiber': return base * 1.25;
     case 'gateway': return base * 1.5;
+    case 'dep-hard': return base * 1.4;
+    case 'dep-soft': return base * 0.85;
     case 'console':
     case 'attached':
     case 'untagged': return base * 0.85;

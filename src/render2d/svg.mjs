@@ -74,7 +74,9 @@ export function renderSvg(graph, placed, theme, opts = {}) {
     parts.push(
       n.kind === 'device'
         ? deviceCard(n, box, graph, theme, { zoneBadge: !groups.usable, interactive, show })
-        : dataCard(n, box, theme, interactive),
+        : n.kind === 'external'
+          ? externalCard(n, box, theme, interactive, show)
+          : dataCard(n, box, theme, interactive),
     );
   }
 
@@ -445,6 +447,39 @@ function portStrip(n, graph, box, theme) {
     `fill="${theme.bgAlt}" stroke="${theme.strokeSoft}" stroke-width="0.7"/>` +
     segs +
     more +
+    `</g>`
+  );
+}
+
+/**
+ * A system outside this diagram. Drawn as a card so it reads as a thing that
+ * runs somewhere, but with a dashed edge, because nothing here documents its
+ * insides — the boundary of the drawing is a fact worth showing.
+ */
+function externalCard(n, box, theme, interactive, show) {
+  const color = theme.role.external ?? theme.textMuted;
+  const up = theme.uppercase;
+  const { x, y, w, h } = box;
+  const textX = x + (show.chassis ? 42 : 12);
+  return (
+    `<g class="nd-node" data-node="${esc(n.id)}" data-role="external"${
+      interactive ? ' tabindex="0"' : ''
+    }>` +
+    `<rect x="${r(x)}" y="${r(y)}" width="${r(w)}" height="${r(h)}" rx="${theme.radius}" ` +
+    `fill="${theme.surfaceAlt}" stroke="${color}" stroke-width="${theme.strokeWidth}" ` +
+    `stroke-dasharray="6 4" stroke-opacity="0.9"/>` +
+    (show.chassis ? icon('external', x + 12, y + h / 2 - 11, 22, color, theme.strokeWidth) : '') +
+    `<text x="${r(textX)}" y="${r(y + h / 2 - 2)}" font-size="12.5" font-weight="650" ` +
+    `font-family="${esc(theme.fontDisplay)}" letter-spacing="${up ? '0.06em' : '0.01em'}" ` +
+    `fill="${theme.text}">${esc(up ? n.label.toUpperCase() : n.label)}</text>` +
+    (n.sublabel && show.sub
+      ? `<text class="nd-detail-sub" x="${r(textX)}" y="${r(y + h / 2 + 13)}" font-size="9.5" ` +
+        `letter-spacing="0.06em" fill="${theme.textMuted}">${esc(n.sublabel.toUpperCase())}</text>`
+      : '') +
+    (show.vendor
+      ? `<text class="nd-detail-vendor" x="${r(x + w - 10)}" y="${r(y + 14)}" text-anchor="end" font-size="7.5" ` +
+        `letter-spacing="0.12em" fill="${theme.textFaint}">EXTERNAL</text>`
+      : '') +
     `</g>`
   );
 }
