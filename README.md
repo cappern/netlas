@@ -1,21 +1,51 @@
-# netdia
+# netlas
 
-Generate L1, L2 and L3 network diagrams from a single declarative model.
+Generate L1, L2 and L3 network diagrams from declarative models — and link many
+of them together in a visual Studio.
 
-One YAML file describes the network once. netdia derives the three layers from
-it, lays them out automatically, and renders them as standalone SVG or as a
-self-contained interactive HTML viewer with an optional stacked 3D view.
+[![CI](https://github.com/cappern/netlas/actions/workflows/ci.yml/badge.svg)](https://github.com/cappern/netlas/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+![The netlas interactive viewer showing the L1 physical layer](docs/images/viewer.png)
+
+netlas does two things:
+
+1. **Generate** — one YAML file describes a network once; netlas derives the
+   three OSI layers from it, lays them out automatically, and renders them as
+   standalone SVG or a self-contained interactive HTML viewer with an optional
+   stacked 3D view. Headless, CI-friendly, no server.
+2. **Studio** — a local SvelteKit app where you add, edit and **link** several
+   designs into a portfolio, so a device in one diagram can drill straight into
+   another diagram. Editing a design's YAML re-renders it live.
 
 ```bash
+git clone https://github.com/cappern/netlas.git
+cd netlas
 npm install
-npm run build:3d          # once, and after any change to src/render3d/
-node bin/netdia.mjs render examples/iac-lab.netdia.yaml -o out/lab.html
+npm run build:3d          # once, and after any change to src/lib/core/render3d/
+
+# Generate a single design (headless)
+node bin/netlas.ts render examples/iac-lab.netlas.yaml -o out/lab.html
+
+# Open the Studio on the example portfolio
+npm run studio            # http://localhost:5173
 ```
+
+## One model, five views
+
+Every diagram below is derived from a single YAML file — change a fact once and
+each view updates together.
+
+| L1 — physical | L3 — routing |
+|---|---|
+| [![L1 physical cabling](docs/images/l1.png)](docs/images/l1.png) | [![L3 IP and routing](docs/images/l3.png)](docs/images/l3.png) |
+| **ISO — isometric** | **DEP — dependencies** |
+| [![Isometric L1](docs/images/iso.png)](docs/images/iso.png) | [![Dependency map](docs/images/dep.png)](docs/images/dep.png) |
 
 ## Why one model
 
 Most network documentation drifts because the physical diagram, the VLAN table
-and the IP plan are three separate drawings maintained by hand. In netdia they
+and the IP plan are three separate drawings maintained by hand. In netlas they
 are three views of one model:
 
 | Layer | Derived from | Shows |
@@ -32,18 +62,29 @@ is nowhere else for the fact to live.
 ## Commands
 
 ```
-netdia validate <model.yaml> [--json]
-netdia svg      <model.yaml> --layer l1|l2|l3|dep [-o file.svg] [--theme <id>] [--detail <level>]
-netdia iso      <model.yaml> [-o file.svg] [--theme <id>] [--detail <level>]
-netdia render   <model.yaml> [-o file.html] [--theme <id>] [--no-3d] [--no-iso]
-netdia freeze   <model.yaml> [--layer l1|l2|l3|dep|all] [--reset]
-netdia themes
-
-netdia netbox portfolio      [-o file] [--theme <id>] [--yaml]
-netdia netbox system <slug>  [-o file] [--theme <id>] [--yaml]
+netlas validate  <model.yaml> [--json]
+netlas svg       <model.yaml> --layer l1|l2|l3|dep [-o file.svg] [--theme <id>] [--detail <level>]
+netlas iso       <model.yaml> [-o file.svg] [--theme <id>] [--detail <level>]
+netlas render    <model.yaml> [-o file.html] [--theme <id>] [--no-3d] [--no-iso]
+netlas freeze    <model.yaml> [--layer l1|l2|l3|dep|all] [--reset]
+netlas workspace <dir> [-o out-dir] [--theme <id>] [--no-3d] [--no-iso]
+netlas themes
 ```
 
-`validate` exits non-zero on error, so it drops straight into CI.
+`validate` exits non-zero on error, so it drops straight into CI. `workspace`
+renders every design in a portfolio to a self-contained HTML file plus an
+`index.html`, wiring the cross-design links as jumps between the files.
+
+## Claude Code skill
+
+The repo ships a [Claude Code](https://claude.com/claude-code) skill at
+`.claude/skills/netlas/`, so anyone who clones can ask Claude to author,
+validate and render netlas models in plain language. It is discovered
+automatically when you work in the repo — describe a network ("draw a branch
+with a firewall, a core switch and two access switches") and Claude writes a
+valid model, validates it, and renders it with the CLI. Run `/netlas` to invoke
+it directly. The skill teaches the model schema (`SKILL.md` for the workflow,
+`reference.md` for every field and enum), so its output stays valid.
 
 ## The model
 
@@ -80,9 +121,9 @@ Three worked examples ship with the project:
 
 | File | Scale | Purpose |
 |---|---|---|
-| `examples/iac-lab.netdia.yaml` | 11 devices | A lab: Palo Alto and Cisco firewalls, Cisco switches, Windows and Linux servers, a hypervisor, a Git host |
-| `examples/enterprise-dc.netdia.yaml` | 59 devices, 68 links, 16 VLANs | A redundant data centre: dual WAN, HA perimeter, two cores, four distribution and four leaf switches, twelve access switches, hypervisors, storage, DMZ |
-| `examples/ise-dependencies.netdia.yaml` | 11 devices, 3 externals, 17 dependencies | A Cisco ISE policy service and everything that leans on it |
+| `examples/iac-lab.netlas.yaml` | 11 devices | A lab: Palo Alto and Cisco firewalls, Cisco switches, Windows and Linux servers, a hypervisor, a Git host |
+| `examples/enterprise-dc.netlas.yaml` | 59 devices, 68 links, 16 VLANs | A redundant data centre: dual WAN, HA perimeter, two cores, four distribution and four leaf switches, twelve access switches, hypervisors, storage, DMZ |
+| `examples/ise-dependencies.netlas.yaml` | 11 devices, 3 externals, 17 dependencies | A Cisco ISE policy service and everything that leans on it |
 
 The larger example exists to exercise layout, labelling and zoning at scale;
 it is covered by its own test file.
@@ -123,8 +164,8 @@ flat layout.
 When automatic placement is not good enough:
 
 ```bash
-netdia freeze model.yaml --layer l1     # writes coordinates into layout:
-netdia freeze model.yaml --reset        # back to automatic
+netlas freeze model.yaml --layer l1     # writes coordinates into layout:
+netlas freeze model.yaml --reset        # back to automatic
 ```
 
 `freeze` writes the solver's chosen coordinates back into the model, where you
@@ -183,54 +224,86 @@ ambiguous. A cycle of hard dependencies is a warning, not an error: mutual
 dependencies are real, and the drawing's job is to show that nothing in the
 cycle can start without the rest.
 
-## NetBox
+## Studio and workspaces
 
-A model you type by hand is a second source of truth for facts something else
-already owns, and two sources of truth for one cable is exactly the drift this
-project was written against. Where NetBox is in use, netdia reads from it
-instead:
+One diagram answers "how is this network built". A real estate of networks
+raises a second question — "where does this one hand off to that one" — and
+that fact belongs between designs, not inside any one of them. A **workspace**
+is a folder of designs plus the links between them:
 
-```bash
-export NETBOX_URL="http://localhost:8000"
-export NETBOX_TOKEN="Bearer nbt_xxxx.yyyy"     # NetBox 4.7+; "Token xxxx" before that
-
-netdia netbox portfolio -o out/portfolio.html  # the systems and what they need
-netdia netbox system ise -o out/ise.html       # one system's cabling and addressing
+```
+examples/portfolio/
+  workspace.netlas.yaml     manifest: which designs, and how they link
+  iac-lab.netlas.yaml       an ordinary netlas model
+  ise.netlas.yaml           another ordinary netlas model
 ```
 
-The division of labour follows what each tool can actually hold. NetBox owns
-inventory: devices, cables, interfaces, addresses, VLANs. It has no concept of
-one service depending on another — its `Service` is an L7 listener bound to a
-box — so that is what netdia's model adds, and it is the only thing a human
-writes by hand.
+```yaml
+# workspace.netlas.yaml
+name: Lab Portfolio
+designs:
+  - { id: iac-lab, file: iac-lab.netlas.yaml, title: IaC Lab }
+  - { id: ise,     file: ise.netlas.yaml,     title: ISE Dependencies }
+links:
+  - from: iac-lab:sw-acc-1   # a device or external in one design …
+    to: ise                  # … drilling into another design
+    kind: drilldown
+    description: Access switch authenticates against the ISE deployment
+```
 
-| Concept | Where it lives |
-|---|---|
-| A system | A NetBox **tenant** |
-| Which system a device belongs to | `Device.tenant` — one box, one system |
-| What a system needs to work | `dependencies`, a JSON custom field on the tenant |
-| Risk card: owner, criticality, RTO/RPO, last reviewed | Custom fields on the tenant |
-| Layout curation | `layout:` in a netdia file — the one thing NetBox has no place for |
+A link's `from` is `<designId>:<nodeId>` and its `to` is another design's id.
+Nothing about the single-design model changes — the manifest is a thin layer
+over ordinary, independently valid designs, so each still renders and validates
+on its own.
 
-The `dependencies` custom field is validated by netdia's own JSON Schema,
-pasted into NetBox's `validation_schema`. NetBox then rejects a missing
-`strength`, an unknown `kind` or a stray key at the point of entry, so the
-same contract holds whether a fact arrives through the API or the UI.
+The **Studio** is the visual front end for a workspace:
 
-Membership and delivery are different relations, and conflating them is the
-usual modelling mistake. `core-01` **belongs to** Kjernenett — one owner. That
-Kontornett, OT-nett and Gjestenett all **depend on** Kjernenett is three
-edges. The multiplicity lives in the edge, not in the membership, which is
-also what makes "infrastructure is itself a service" fall out for free: a
-network and a platform are both tenants, differing only in their group.
+```bash
+NETLAS_WORKSPACE=examples/portfolio npm run studio   # defaults to examples/portfolio
+```
 
-The resolver produces the same plain object the YAML loader produces, so every
-layer, renderer and viewer works unchanged — and `--yaml` writes that object
-out, which is how you pin a drawing to a revision or diff what NetBox changed.
+- An **overview** lists every design with its device and VLAN counts and shows
+  the links between them.
+- Opening a design gives the same L1/L2/L3/DEP/ISO tabs, pan and zoom, and
+  click-to-inspect as the static viewer, driven from the same core renderers.
+- The **link editor** ties a node to another design. A linked node shows a
+  "Links to" affordance in the inspector, and clicking it navigates to that
+  design — the portfolio walked hop by hop.
 
-A layer appears only when the facts to draw it exist. A portfolio has no
-cabling, so it has no L1 tab; a NetBox with no VLANs produces no L2. An empty
-tab would assert an absence nobody stated.
+Export the whole portfolio to static HTML with `netlas workspace <dir>`; the
+cross-design links become `<a href>` jumps between the emitted files.
+
+### Editing
+
+Press **Edit** to turn a design into a live canvas. The whole derive → layout →
+render pipeline runs in the browser, so every change repaints instantly with the
+same renderer the export uses — the drawing you edit is the drawing you ship.
+
+- **Layouts** — placement is automatic by default (the **Auto** layout, ELK),
+  and Auto owns its own positions, so nodes are not draggable. Switch the
+  **Layout** control to a named layout — or add one — to unlock free dragging;
+  hand-placed coordinates are then stored in that layout. Each design chooses
+  which layout renders outside the Studio (**Set default**), so Auto stays the
+  default and manual arrangements are opt-in and never accidental.
+- **Move** — with a manual layout active, drag any node; the diff shows exactly
+  what a human moved. (`netlas freeze` does the same thing from the CLI.)
+- **Connect** — drag from a node's knob to another node to lay a cable. The new
+  link is routed by the layout engine, so it looks like every other cable.
+- **Add** — the palette adds a device by role; drop it, then wire it up.
+- **Delete** — select a node or link and press Delete (or use the inspector).
+  Deleting a device takes its cables with it.
+- **Properties** — selecting a device opens an editor for its identity, site,
+  zone and interfaces; the **Model** panel edits the collections that aren't on
+  the canvas: sites, zones, VLANs, subnets and dependencies.
+
+Enum fields (role, vendor, interface mode, zone kind, dependency strength) are
+dropdowns drawn from the schema, so an edit can't drift out of the contract.
+**Save** validates the whole model and writes YAML only if it still loads —
+an invalid edit is reported, never persisted.
+
+The Studio's live design view covers L1/L2/L3/DEP and the isometric L1. The
+stacked WebGL 3D view currently ships only in the self-contained HTML export
+(`netlas render` / `netlas workspace`), not yet in the live Studio.
 
 ## Themes
 
@@ -250,7 +323,7 @@ carry.
 
 ## Isometric L1
 
-`netdia iso` draws the physical layer as a 2.5D floor plan: devices are slabs
+`netlas iso` draws the physical layer as a 2.5D floor plan: devices are slabs
 standing on their security zone's floor plate, cables run through the space
 between them, and a painter's-algorithm depth sort makes a slab in front hide
 the cable behind it. It is ordinary SVG, so it prints and exports like every
@@ -290,7 +363,7 @@ in one screenshot and is unreadable everywhere else.
 
 ## Level of detail
 
-Large diagrams carry detail that is only meaningful up close. netdia can drop
+Large diagrams carry detail that is only meaningful up close. netlas can drop
 it, in the viewer through the **Auto / Full / Mid / Low** control, and in a
 static export through `--detail`.
 
@@ -317,7 +390,7 @@ Static exports shrink accordingly: the enterprise L1 goes 177 KB → 79 KB.
 
 ## Viewer
 
-`netdia render` produces one HTML file with no external requests — no CDN, no
+`netlas render` produces one HTML file with no external requests — no CDN, no
 web fonts, no network at all. It opens from a USB stick in a plant room.
 
 Tabs for L1, L2, L3, DEP, ISO and 3D; pan and zoom; a level-of-detail control;
@@ -368,29 +441,90 @@ is carried by a short text mark, which is accurate and unrestricted.
 npm test
 ```
 
-117 tests covering validation rules, layer derivation, tier ordering, zone-hull
+108 tests covering validation rules, layer derivation, tier ordering, zone-hull
 and zone-plate fallbacks, minimum zone gutters on each axis, SVG
 well-formedness in every theme, XML escaping, viewBox containment for both
 renderers, isometric depth ordering, face-matrix orientation, faceplate/port
-agreement between the two views, freeze round-trips, and a scale suite that
-holds the 59-device example to a readable aspect ratio, keeps isometric cable
-crossings under 5%, proves that lowering detail never removes a device, a
-cable or a name, asserts that edge detail never repeats a fact the edge
-already carries, a dependency suite that locks the endpoint grammar, the
-merge, the cycle report and the agreement between the impact panel's counts
-and the arrows actually drawn, and a NetBox suite that pins the vocabulary
-mapping and resolves a fake API into a model that renders.
+agreement between the two views, freeze round-trips, manual-layout edge fan-out
+and named-layout resolution, and a scale suite that holds the 59-device example
+to a readable aspect ratio, keeps isometric cable crossings under 5%, proves
+that lowering detail never removes a device, a cable or a name, asserts that
+edge detail never repeats a fact the edge already carries, a dependency suite
+that locks the endpoint grammar, the merge, the cycle report and the agreement
+between the impact panel's counts and the arrows actually drawn, and a
+workspace suite that covers manifest loading, the link grammar, cross-design
+link resolution and dangling-link detection.
+
+The same checks run in CI on every push and pull request
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml)): type-check,
+`svelte-check`, the test suite, and validation of every bundled example.
 
 ## Layout of the repository
 
 ```
-bin/netdia.mjs        CLI
-src/model/            schema, loader, validator, layer derivation, impact map
-src/netbox/           REST client and the NetBox -> model resolver
-src/layout/           ELK layout, role tiers, freeze
-src/render2d/         flat SVG renderer, isometric renderer, icon set
-src/render3d/         three.js stacked-layer scene (+ prebuilt bundle)
-src/theme/            theme tokens
-src/viewer/           HTML viewer shell, CSS, runtime
-examples/             worked examples
+bin/netlas.ts         CLI (thin wrapper over src/lib/core)
+.claude/skills/netlas Claude Code skill: authoring + CLI workflow for cloners
+src/lib/core/         framework-agnostic core, shared by CLI and Studio
+  model/              schema, loader, validator, layer derivation, impact map
+  workspace/          workspace manifest load/save + cross-design link resolution
+  layout/             ELK layout, role tiers, freeze
+  render2d/           flat SVG renderer, isometric renderer, icon set
+  render3d/           three.js stacked-layer scene (+ prebuilt bundle)
+  theme/              theme tokens
+  viewer/             self-contained HTML viewer shell, CSS, runtime (CLI export)
+src/lib/components/   Studio Svelte components (canvas, inspector, editors)
+src/lib/server/       Studio server helpers (render pipeline, workspace resolution)
+src/routes/           SvelteKit routes: overview, design view, JSON APIs
+examples/             worked examples, incl. examples/portfolio (a workspace)
+docs/images/          screenshots used by this README
+.github/workflows/    CI (type-check, svelte-check, tests, example validation)
 ```
+
+## Contributing
+
+Contributions are welcome — bug reports, new examples, themes, and renderer or
+Studio improvements.
+
+**Getting set up**
+
+```bash
+git clone https://github.com/cappern/netlas.git
+cd netlas
+npm install
+npm run build:3d
+npm test
+```
+
+Node ≥ 23 is required (the CLI runs TypeScript directly).
+
+**Before opening a pull request**
+
+```bash
+npm run typecheck          # tsc --noEmit
+npm run check              # svelte-check
+npm test                   # the full suite
+npm run validate:examples  # every bundled model still validates
+```
+
+CI runs exactly these on every push and pull request, so a green local run is a
+green build.
+
+**Guidelines**
+
+- The model is the single source of truth. Prefer teaching the model a new fact
+  over special-casing a renderer.
+- Add or update a test with any behaviour change — the suite is the contract,
+  and validation rules in particular should come with a test that fails without
+  the fix.
+- Keep `src/lib/core/` framework-agnostic: it is shared by the CLI and the
+  Studio and must not import SvelteKit.
+- Match the surrounding style; comments explain *why*, not *what*.
+- If you change the model schema, update `src/lib/core/model/model.schema.json`,
+  the TypeScript types, and the Claude Code skill's `reference.md` together.
+
+Open an issue first for anything large or structural so we can agree on the
+shape before you build it.
+
+## License
+
+[MIT](LICENSE) © Christoffer Cappelen
