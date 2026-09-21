@@ -441,12 +441,16 @@ is carried by a short text mark, which is accurate and unrestricted.
 npm test
 ```
 
-108 tests covering validation rules, layer derivation, tier ordering, zone-hull
+112 tests covering validation rules, layer derivation, tier ordering, zone-hull
 and zone-plate fallbacks, minimum zone gutters on each axis, SVG
 well-formedness in every theme, XML escaping, viewBox containment for both
 renderers, isometric depth ordering, face-matrix orientation, faceplate/port
 agreement between the two views, freeze round-trips, manual-layout edge fan-out
-and named-layout resolution, and a scale suite that holds the 59-device example
+and named-layout resolution, and — because the output is a picture a human
+reads — a visible-output suite that asserts device cards never overlap, every
+device is drawn as named text, separable zones render as labelled boxes, and the
+legend names every cable medium actually drawn. Plus a scale suite that holds
+the 59-device example
 to a readable aspect ratio, keeps isometric cable crossings under 5%, proves
 that lowering detail never removes a device, a cable or a name, asserts that
 edge detail never repeats a fact the edge already carries, a dependency suite
