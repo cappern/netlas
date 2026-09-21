@@ -1,0 +1,315 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://netlas.dev/schemas/model.schema.json",
+  "title": "netlas network model",
+  "type": "object",
+  "required": ["meta", "devices"],
+  "additionalProperties": false,
+  "properties": {
+    "meta": {
+      "type": "object",
+      "required": ["title"],
+      "additionalProperties": false,
+      "properties": {
+        "title": { "type": "string", "minLength": 1 },
+        "subtitle": { "type": "string" },
+        "theme": { "type": "string" },
+        "version": { "type": "string" },
+        "owner": { "type": "string" },
+        "updated": { "type": "string" }
+      }
+    },
+
+    "sites": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "$ref": "#/definitions/id" },
+          "label": { "type": "string" },
+          "kind": { "enum": ["dc", "branch", "cloud", "lab", "edge"] }
+        }
+      }
+    },
+
+    "zones": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "$ref": "#/definitions/id" },
+          "label": { "type": "string" },
+          "site": { "$ref": "#/definitions/id" },
+          "kind": { "enum": ["trust", "dmz", "untrust", "mgmt", "oob", "internal", "external"] }
+        }
+      }
+    },
+
+    "devices": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "type": "object",
+        "required": ["id", "role"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "$ref": "#/definitions/id" },
+          "label": { "type": "string" },
+          "role": {
+            "enum": [
+              "internet", "wan", "router", "firewall", "loadbalancer",
+              "core", "distribution", "access", "wireless",
+              "server", "hypervisor", "storage", "container", "service",
+              "client", "appliance"
+            ]
+          },
+          "vendor": {
+            "enum": [
+              "cisco", "paloalto", "fortinet", "juniper", "arista",
+              "microsoft", "linux", "vmware", "proxmox", "aws", "azure",
+              "git", "generic"
+            ]
+          },
+          "model": { "type": "string" },
+          "os": { "type": "string" },
+          "site": { "$ref": "#/definitions/id" },
+          "zone": { "$ref": "#/definitions/id" },
+          "tier": { "type": "integer", "minimum": 0, "maximum": 20 },
+          "stack": { "type": "integer", "minimum": 1, "description": "Number of stacked/HA members" },
+          "notes": { "type": "string" },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "mgmt_ip": { "$ref": "#/definitions/ipOrCidr" },
+          "interfaces": { "type": "array", "items": { "$ref": "#/definitions/interface" } },
+          "services": { "type": "array", "items": { "$ref": "#/definitions/service" } }
+        }
+      }
+    },
+
+    "externals": {
+      "type": "array",
+      "description": "Systems outside this diagram that dependencies may point at. Kept out of devices: so they never appear in L1/L2/L3.",
+      "items": {
+        "type": "object",
+        "required": ["id"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "$ref": "#/definitions/id" },
+          "label": { "type": "string" },
+          "kind": {
+            "enum": ["identity", "saas", "vendor", "internal-service", "directory", "pki", "monitoring", "unknown"]
+          },
+          "owner": { "type": "string" },
+          "url": { "type": "string" },
+          "notes": { "type": "string" },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "services": { "type": "array", "items": { "$ref": "#/definitions/service" } }
+        }
+      }
+    },
+
+    "dependencies": {
+      "type": "array",
+      "description": "Directed 'A needs B to work' facts between devices, their services, and external systems.",
+      "items": {
+        "type": "object",
+        "required": ["from", "to", "strength"],
+        "additionalProperties": false,
+        "properties": {
+          "from": { "$ref": "#/definitions/depEndpoint" },
+          "to": { "$ref": "#/definitions/depEndpoint" },
+          "kind": {
+            "enum": [
+              "transport", "compute",
+              "auth", "dns", "ntp", "pki", "logging", "monitoring", "api",
+              "database", "storage", "backup", "management", "sync", "license", "other"
+            ]
+          },
+          "strength": {
+            "enum": ["hard", "soft"],
+            "description": "hard: the consumer stops working without it. soft: degraded but running. Required — a documentation tool must not guess severity."
+          },
+          "description": { "type": "string" }
+        }
+      }
+    },
+
+    "links": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["a", "b"],
+        "additionalProperties": false,
+        "properties": {
+          "a": { "$ref": "#/definitions/endpoint" },
+          "b": { "$ref": "#/definitions/endpoint" },
+          "media": { "enum": ["copper", "fiber", "virtual", "wireless", "wan", "console"] },
+          "speed": { "$ref": "#/definitions/speed" },
+          "lag": { "type": "string", "description": "Port-channel / bond name grouping links" },
+          "label": { "type": "string" },
+          "redundant": { "type": "boolean" }
+        }
+      }
+    },
+
+    "vlans": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "integer", "minimum": 1, "maximum": 4094 },
+          "name": { "type": "string" },
+          "subnet": { "$ref": "#/definitions/cidr" },
+          "gateway": { "$ref": "#/definitions/ip" },
+          "vrf": { "type": "string" },
+          "zone": { "$ref": "#/definitions/id" },
+          "purpose": { "type": "string" }
+        }
+      }
+    },
+
+    "subnets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["cidr"],
+        "additionalProperties": false,
+        "properties": {
+          "cidr": { "$ref": "#/definitions/cidr" },
+          "name": { "type": "string" },
+          "vrf": { "type": "string" },
+          "gateway": { "$ref": "#/definitions/ip" },
+          "dhcp": { "type": "boolean" },
+          "zone": { "$ref": "#/definitions/id" }
+        }
+      }
+    },
+
+    "routing": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["from", "to"],
+        "additionalProperties": false,
+        "properties": {
+          "from": { "$ref": "#/definitions/id" },
+          "to": { "$ref": "#/definitions/id" },
+          "kind": { "enum": ["static", "default", "bgp", "ospf", "eigrp", "nat", "vpn", "peering"] },
+          "detail": { "type": "string" },
+          "vrf": { "type": "string" },
+          "bidirectional": { "type": "boolean" }
+        }
+      }
+    },
+
+    "layout": {
+      "type": "object",
+      "description": "Frozen coordinates. Empty means automatic layout.",
+      "additionalProperties": { "$ref": "#/definitions/layoutLayer" }
+    },
+
+    "defaultLayout": {
+      "type": "string",
+      "description": "Id of the layout rendered outside Studio. Absent or \"auto\" means automatic layout."
+    },
+
+    "layouts": {
+      "type": "array",
+      "description": "Named manual layouts created in Studio.",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "layers"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "layers": {
+            "type": "object",
+            "additionalProperties": { "$ref": "#/definitions/layoutLayer" }
+          }
+        }
+      }
+    }
+  },
+
+  "definitions": {
+    "layoutLayer": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "nodes": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["x", "y"],
+            "additionalProperties": false,
+            "properties": {
+              "x": { "type": "number" },
+              "y": { "type": "number" }
+            }
+          }
+        }
+      }
+    },
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+    "ip": { "type": "string", "pattern": "^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$" },
+    "cidr": { "type": "string", "pattern": "^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])/(3[0-2]|[12]?[0-9])$" },
+    "ipOrCidr": { "type": "string" },
+    "speed": { "enum": ["100M", "1G", "2.5G", "5G", "10G", "25G", "40G", "100G", "400G"] },
+    "endpoint": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*(:[^:]+)?$",
+      "description": "device-id or device-id:interface-name"
+    },
+    "depEndpoint": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:+/ -]*$",
+      "description": "device-id, external-id, or <id>:<service-name>. Resolved whole-string first, so an id containing a colon still works."
+    },
+    "interface": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "label": { "type": "string" },
+        "speed": { "$ref": "#/definitions/speed" },
+        "mode": { "enum": ["access", "trunk", "routed", "loopback", "svi", "mgmt", "wan"] },
+        "vlan": { "type": "integer", "minimum": 1, "maximum": 4094 },
+        "vlans": { "type": "array", "items": { "type": "integer", "minimum": 1, "maximum": 4094 } },
+        "native_vlan": { "type": "integer", "minimum": 1, "maximum": 4094 },
+        "ip": { "$ref": "#/definitions/cidr" },
+        "vrf": { "type": "string" },
+        "zone": { "$ref": "#/definitions/id" },
+        "lag": { "type": "string" },
+        "description": { "type": "string" },
+        "shutdown": { "type": "boolean" }
+      }
+    },
+    "service": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._+/ -]*$",
+          "description": "No colons: a dependency endpoint splits on the last colon to find the service."
+        },
+        "label": { "type": "string" },
+        "critical": { "type": "boolean", "description": "Losing this service takes the device out of service." },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "proto": { "enum": ["tcp", "udp", "http", "https", "ssh", "grpc"] },
+        "url": { "type": "string" },
+        "notes": { "type": "string" }
+      }
+    }
+  }
+}

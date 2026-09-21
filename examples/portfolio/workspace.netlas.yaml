@@ -1,0 +1,13 @@
+name: Lab Portfolio
+designs:
+  - id: iac-lab
+    file: iac-lab.netlas.yaml
+    title: IaC Lab
+  - id: ise
+    file: ise.netlas.yaml
+    title: ISE Dependencies
+links:
+  - from: iac-lab:sw-acc-1
+    to: ise
+    kind: drilldown
+    description: Access switch authenticates against the ISE deployment
